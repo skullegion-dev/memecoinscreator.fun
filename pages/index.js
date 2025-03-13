@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType } from '@solana/spl-token';
@@ -15,7 +15,8 @@ const REVOKE_FEE_AMOUNT = 0.025 * 10 ** 9; // 0.025 SOL for revoke actions
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
-  const { publicKey, sendTransaction, connected } = useWallet();
+  const { connection } = useConnection();
+  const { publicKey, signAndSendTransaction, signTransaction, connected, wallet } = useWallet();
   const [tokenName, setTokenName] = useState('');
   const [tokenSymbol, setTokenSymbol] = useState('');
   const [supply, setSupply] = useState('');
@@ -27,21 +28,51 @@ export default function Home() {
   const [revokeMint, setRevokeMint] = useState(false);
   const [revokeFreeze, setRevokeFreeze] = useState(true);
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
-
-  const connection = new Connection(
-    'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/',
-    'confirmed'
-  );
+  const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
     try {
       const id = new PublicKey(TOKEN_PROGRAM_ID);
       setTokenProgramId(id);
+      console.log('Token Program ID set:', id.toBase58());
     } catch (error) {
       console.error('Failed to set TOKEN_PROGRAM_ID:', error);
       setStatus(`Error initializing program: ${error.message}`);
     }
   }, []);
+
+  useEffect(() => {
+    if (connected && publicKey && wallet?.adapter) {
+      console.log('Wallet connected:', publicKey.toBase58());
+      console.log('Wallet adapter:', wallet.adapter.name);
+      console.log('signAndSendTransaction:', !!signAndSendTransaction);
+      console.log('signTransaction:', !!signTransaction);
+      console.log('Raw wallet adapter methods:', Object.keys(wallet.adapter));
+      setWalletReady(!!signAndSendTransaction || !!signTransaction);
+    } else {
+      setWalletReady(false);
+    }
+  }, [connected, publicKey, wallet, signAndSendTransaction, signTransaction]);
+
+  const getSignAndSendTransaction = async () => {
+    if (signAndSendTransaction) {
+      console.log('Signing method selected: signAndSendTransaction from useWallet');
+      return signAndSendTransaction;
+    }
+    if (wallet?.adapter?.signAndSendTransaction) {
+      console.log('Signing method selected: signAndSendTransaction from wallet.adapter');
+      return wallet.adapter.signAndSendTransaction.bind(wallet.adapter);
+    }
+    if (signTransaction) {
+      console.log('Signing method selected: Fallback to signTransaction + sendRawTransaction');
+      return async (transaction, options) => {
+        const signedTx = await signTransaction(transaction);
+        const signature = await connection.sendRawTransaction(signedTx.serialize());
+        return { signature };
+      };
+    }
+    throw new Error('No transaction signing method available');
+  };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -58,30 +89,51 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    if (!connected || !publicKey || !sendTransaction || !tokenProgramId) {
-      setStatus('Connect your wallet to Mainnet and blast off for just 0.05 SOL!');
+    console.log('Debug - connected:', connected);
+    console.log('Debug - publicKey:', publicKey?.toBase58() || 'null');
+    console.log('Debug - signAndSendTransaction:', !!signAndSendTransaction);
+    console.log('Debug - signTransaction:', !!signTransaction);
+    console.log('Debug - tokenProgramId:', tokenProgramId?.toBase58() || 'null');
+    console.log('Debug - wallet adapter:', wallet?.adapter.name || 'none');
+    console.log('Debug - wallet methods:', wallet?.adapter ? Object.keys(wallet.adapter) : 'none');
+
+    if (!walletReady) {
+      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+      return;
+    }
+
+    const signAndSend = await getSignAndSendTransaction();
+
+    if (!connected || !publicKey || !signAndSend || !tokenProgramId) {
+      let errorMsg = 'Connect your wallet to Mainnet and blast off for just 0.05 SOL!';
+      if (!connected) errorMsg = 'Wallet not connected! Please reconnect.';
+      else if (!publicKey) errorMsg = 'No public key detected! Reconnect wallet.';
+      else if (!signAndSend) errorMsg = 'No signing method available! Reload or update Phantom.';
+      else if (!tokenProgramId) errorMsg = 'Token program ID not initialized!';
+      setStatus(errorMsg);
       return;
     }
     try {
       setStatus('Checking SOL balance...');
       let totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT;
-      if (revokeMint) {
-        totalRequiredLamports += REVOKE_FEE_AMOUNT;
-      }
+      if (revokeMint) totalRequiredLamports += REVOKE_FEE_AMOUNT;
       const totalRequiredSOL = totalRequiredLamports / LAMPORTS_PER_SOL;
-      const balanceInLamports = await connection.getBalance(publicKey);
+      let balanceInLamports;
+      try {
+        balanceInLamports = await connection.getBalance(publicKey);
+      } catch (rpcError) {
+        throw new Error(`RPC error fetching balance: ${rpcError.message}`);
+      }
       const balanceInSOL = balanceInLamports / LAMPORTS_PER_SOL;
       if (balanceInLamports < totalRequiredLamports) {
         throw new Error(
-          `Insufficient SOL: You have ${balanceInSOL.toFixed(4)} SOL, but ${totalRequiredSOL.toFixed(
-            4
-          )} SOL is required for token creation${revokeMint ? ' and revoke mint' : ''}.`
+          `Insufficient SOL: You have ${balanceInSOL.toFixed(4)} SOL, but ${totalRequiredSOL.toFixed(4)} SOL is required.`
         );
       }
-      setStatus('Launching the cheapest Solana token straight to Raydium for 0.05 SOL...');
+      setStatus('Launching the cheapest Solana token for 0.05 SOL...');
       const mintKeypair = Keypair.generate();
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
-      let lamports = await connection.getMinimumBalanceForRentExemption(82);
+      const lamports = await connection.getMinimumBalanceForRentExemption(82);
       const transaction = new Transaction();
       transaction.add(
         SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
@@ -126,18 +178,16 @@ export default function Home() {
           )
         );
       }
-      const signature = await sendTransaction(transaction, connection, { signers: [mintKeypair] });
+      const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
       await connection.confirmTransaction(signature, 'confirmed');
       const mintAddr = mintKeypair.publicKey.toBase58();
       setMintAddress(mintAddr);
       setStatus(
-        `Token launched for 0.05 SOL + 0.025 SOL revoke freeze${
-          revokeMint ? ' + 0.025 SOL revoke mint' : ''
-        }! Live on Raydium & Dexscreener NOW: ${mintAddr} - To the MOON! 🚀`
+        `Token launched for 0.05 SOL + 0.025 SOL revoke freeze${revokeMint ? ' + 0.025 SOL revoke mint' : ''}! Live on Raydium & Dexscreener: ${mintAddr} 🚀`
       );
     } catch (error) {
       console.error('Token creation error:', error);
-      setStatus(`Error: ${error.message} - Retry the cheapest launch ever for 0.05 SOL!`);
+      setStatus(`Error: ${error.message} - Retry for 0.05 SOL!`);
     }
   };
 
@@ -145,7 +195,16 @@ export default function Home() {
     const isChecked = e.target.checked;
     setRevokeMint(isChecked);
     if (!isChecked || !mintAddress) return;
-    if (!connected || !publicKey || !sendTransaction) {
+
+    if (!walletReady) {
+      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+      setRevokeMint(false);
+      return;
+    }
+
+    const signAndSend = await getSignAndSendTransaction();
+
+    if (!connected || !publicKey || !signAndSend) {
       setStatus('Reconnect wallet to revoke mint for just 0.025 SOL!');
       setRevokeMint(false);
       return;
@@ -161,7 +220,7 @@ export default function Home() {
       transaction.add(
         createSetAuthorityInstruction(mintPublicKey, publicKey, AuthorityType.MintTokens, null, [], tokenProgramId)
       );
-      const signature = await sendTransaction(transaction, connection);
+      const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction(signature, 'confirmed');
       setStatus('Mint authority revoked - Locked and loaded for the cheapest hype!');
     } catch (error) {
@@ -180,7 +239,14 @@ export default function Home() {
   };
 
   const revokeExistingMint = async () => {
-    if (!connected || !publicKey || !sendTransaction || !tokenProgramId) {
+    if (!walletReady) {
+      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+      return;
+    }
+
+    const signAndSend = await getSignAndSendTransaction();
+
+    if (!connected || !publicKey || !signAndSend || !tokenProgramId) {
       setStatus('Connect your wallet to revoke mint for an existing token (0.025 SOL)!');
       return;
     }
@@ -199,10 +265,7 @@ export default function Home() {
       transaction.add(
         createSetAuthorityInstruction(mintPublicKey, publicKey, AuthorityType.MintTokens, null, [], tokenProgramId)
       );
-      const { blockhash } = await connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = publicKey;
-      const signature = await sendTransaction(transaction, connection);
+      const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction(signature, 'confirmed');
       setStatus(`Mint authority revoked for ${selectedMintAddress} - Secured for just 0.025 SOL!`);
       setSelectedMintAddress('');
@@ -336,32 +399,15 @@ export default function Home() {
                 Launch your Solana memecoin in minutes with the cheapest tool around! Here’s how:
               </p>
               <ol className={styles.guideList}>
-                <li>
-                  <strong>Connect Wallet:</strong> Click "Connect Wallet" and link your Solana wallet (e.g.,
-                  Phantom).
-                </li>
-                <li>
-                  <strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.
-                </li>
-                <li>
-                  <strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").
-                </li>
-                <li>
-                  <strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL). Optionally revoke mint for
-                  an extra 0.025 SOL.
-                </li>
-                <li>
-                  <strong>Add Liquidity:</strong> Use "Create Liquidity Pool" to head to Raydium and make your
-                  token tradable.
-                </li>
-                <li>
-                  <strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," choose a token, and
-                  revoke its mint authority for 0.025 SOL.
-                </li>
+                <li><strong>Connect Wallet:</strong> Click "Connect Wallet" and link your Solana wallet (e.g., Phantom).</li>
+                <li><strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.</li>
+                <li><strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").</li>
+                <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL). Optionally revoke mint for an extra 0.025 SOL.</li>
+                <li><strong>Add Liquidity:</strong> Use "Create Liquidity Pool" to head to Raydium and make your token tradable.</li>
+                <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," choose a token, and revoke its mint authority for 0.025 SOL.</li>
               </ol>
               <p className={styles.guideText}>
-                Your token will be live on Raydium and visible on Dexscreener instantly after adding
-                liquidity!
+                Your token will be live on Raydium and visible on Dexscreener instantly after adding liquidity!
               </p>
             </section>
             <section className={styles.faq}>
@@ -385,10 +431,7 @@ export default function Home() {
                 </div>
                 <div className={styles.faqItem}>
                   <h3>What if I encounter an error?</h3>
-                  <p>
-                    Ensure your wallet has enough SOL, is on Mainnet, and you’re the token’s authority.
-                    Contact support if issues persist.
-                  </p>
+                  <p>Ensure your wallet has enough SOL, is on Mainnet, and you’re the token’s authority. Contact support if issues persist.</p>
                 </div>
               </div>
             </section>
