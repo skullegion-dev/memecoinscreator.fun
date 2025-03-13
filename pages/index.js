@@ -10,8 +10,8 @@ const WalletMultiButtonDynamic = dynamic(
   { ssr: false }
 );
 
-const FEE_AMOUNT = 0.1 * 10 ** 9; // 0.1 SOL for token creation
-const REVOKE_FEE_AMOUNT = 0.05 * 10 ** 9; // 0.05 SOL for revoke actions
+const FEE_AMOUNT = 0.05 * 10 ** 9; // 0.05 SOL for token creation
+const REVOKE_FEE_AMOUNT = 0.025 * 10 ** 9; // 0.025 SOL for revoke actions
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
@@ -25,8 +25,8 @@ export default function Home() {
   const [imagePreview, setImagePreview] = useState(null);
   const [mintAddress, setMintAddress] = useState(null);
   const [revokeMint, setRevokeMint] = useState(false);
-  const [revokeFreeze, setRevokeFreeze] = useState(true); // Mandatory at creation
-  const [selectedMintAddress, setSelectedMintAddress] = useState(''); // For revoke mint selection
+  const [revokeFreeze, setRevokeFreeze] = useState(true);
+  const [selectedMintAddress, setSelectedMintAddress] = useState('');
 
   const connection = new Connection(
     'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/',
@@ -59,25 +59,18 @@ export default function Home() {
 
   const createToken = async () => {
     if (!connected || !publicKey || !sendTransaction || !tokenProgramId) {
-      setStatus('Connect your wallet to Mainnet and blast off for just 0.1 SOL!');
+      setStatus('Connect your wallet to Mainnet and blast off for just 0.05 SOL!');
       return;
     }
-
     try {
       setStatus('Checking SOL balance...');
-
-      // Calculate total required SOL
-      let totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT; // Base fee + revoke freeze (mandatory)
+      let totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT;
       if (revokeMint) {
-        totalRequiredLamports += REVOKE_FEE_AMOUNT; // Add revoke mint fee if selected
+        totalRequiredLamports += REVOKE_FEE_AMOUNT;
       }
       const totalRequiredSOL = totalRequiredLamports / LAMPORTS_PER_SOL;
-
-      // Get user's SOL balance
       const balanceInLamports = await connection.getBalance(publicKey);
       const balanceInSOL = balanceInLamports / LAMPORTS_PER_SOL;
-
-      // Check if balance is sufficient
       if (balanceInLamports < totalRequiredLamports) {
         throw new Error(
           `Insufficient SOL: You have ${balanceInSOL.toFixed(4)} SOL, but ${totalRequiredSOL.toFixed(
@@ -85,13 +78,10 @@ export default function Home() {
           )} SOL is required for token creation${revokeMint ? ' and revoke mint' : ''}.`
         );
       }
-
-      setStatus('Launching the cheapest Solana token straight to Raydium for 0.1 SOL...');
-
+      setStatus('Launching the cheapest Solana token straight to Raydium for 0.05 SOL...');
       const mintKeypair = Keypair.generate();
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
       let lamports = await connection.getMinimumBalanceForRentExemption(82);
-
       const transaction = new Transaction();
       transaction.add(
         SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
@@ -121,7 +111,6 @@ export default function Home() {
           tokenProgramId
         )
       );
-
       if (revokeMint) {
         transaction.add(
           SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT })
@@ -137,20 +126,18 @@ export default function Home() {
           )
         );
       }
-
       const signature = await sendTransaction(transaction, connection, { signers: [mintKeypair] });
       await connection.confirmTransaction(signature, 'confirmed');
-
       const mintAddr = mintKeypair.publicKey.toBase58();
       setMintAddress(mintAddr);
       setStatus(
-        `Token launched for 0.1 SOL + 0.05 SOL revoke freeze${
-          revokeMint ? ' + 0.05 SOL revoke mint' : ''
+        `Token launched for 0.05 SOL + 0.025 SOL revoke freeze${
+          revokeMint ? ' + 0.025 SOL revoke mint' : ''
         }! Live on Raydium & Dexscreener NOW: ${mintAddr} - To the MOON! 🚀`
       );
     } catch (error) {
       console.error('Token creation error:', error);
-      setStatus(`Error: ${error.message} - Retry the cheapest launch ever for 0.1 SOL!`);
+      setStatus(`Error: ${error.message} - Retry the cheapest launch ever for 0.05 SOL!`);
     }
   };
 
@@ -159,12 +146,12 @@ export default function Home() {
     setRevokeMint(isChecked);
     if (!isChecked || !mintAddress) return;
     if (!connected || !publicKey || !sendTransaction) {
-      setStatus('Reconnect wallet to revoke mint for just 0.05 SOL!');
+      setStatus('Reconnect wallet to revoke mint for just 0.025 SOL!');
       setRevokeMint(false);
       return;
     }
     try {
-      setStatus('Revoking mint authority (0.05 SOL fee)...');
+      setStatus('Revoking mint authority (0.025 SOL fee)...');
       const mintPublicKey = new PublicKey(mintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
       const transaction = new Transaction();
@@ -189,14 +176,12 @@ export default function Home() {
       setStatus('Connect your wallet to select a token to revoke!');
       return;
     }
-    // Placeholder: In a real app, this would fetch tokens from the wallet and present a dropdown
     setStatus('Please select a token from your wallet.');
-    // Example: setSelectedMintAddress('EnterMintAddressHereManuallyForTesting');
   };
 
   const revokeExistingMint = async () => {
     if (!connected || !publicKey || !sendTransaction || !tokenProgramId) {
-      setStatus('Connect your wallet to revoke mint for an existing token (0.05 SOL)!');
+      setStatus('Connect your wallet to revoke mint for an existing token (0.025 SOL)!');
       return;
     }
     if (!selectedMintAddress) {
@@ -204,7 +189,7 @@ export default function Home() {
       return;
     }
     try {
-      setStatus('Revoking mint authority for selected token (0.05 SOL fee)...');
+      setStatus('Revoking mint authority for selected token (0.025 SOL fee)...');
       const mintPublicKey = new PublicKey(selectedMintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
       const transaction = new Transaction();
@@ -219,8 +204,8 @@ export default function Home() {
       transaction.feePayer = publicKey;
       const signature = await sendTransaction(transaction, connection);
       await connection.confirmTransaction(signature, 'confirmed');
-      setStatus(`Mint authority revoked for ${selectedMintAddress} - Secured for just 0.05 SOL!`);
-      setSelectedMintAddress(''); // Reset after success
+      setStatus(`Mint authority revoked for ${selectedMintAddress} - Secured for just 0.025 SOL!`);
+      setSelectedMintAddress('');
     } catch (error) {
       console.error('Revoke existing mint error:', error);
       setStatus(`Error revoking mint for selected token: ${error.message}`);
@@ -228,7 +213,7 @@ export default function Home() {
   };
 
   const handleRevokeFreeze = async (e) => {
-    setStatus('Revoke freeze is mandatory and already applied during token launch for 0.05 SOL!');
+    setStatus('Revoke freeze is mandatory and already applied during token launch for 0.025 SOL!');
     setRevokeFreeze(true);
   };
 
@@ -251,7 +236,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Launch Solana Tokens for Just 0.1 SOL!</h1>
+            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL!</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
@@ -297,7 +282,7 @@ export default function Home() {
               <div className={styles.buttonGroup}>
                 <div className={styles.buttonRow}>
                   <button onClick={createToken} className={styles.createButton}>
-                    Launch Memecoin 🚀 (0.1 SOL)
+                    Launch Memecoin 🚀 (0.05 SOL)
                   </button>
                   <button onClick={redirectToRaydiumLiquidity} className={styles.createButton}>
                     Create Liquidity Pool
@@ -305,7 +290,7 @@ export default function Home() {
                 </div>
                 <div className={styles.buttonRow}>
                   <label className={styles.switchLabel}>
-                    Revoke Mint (0.05 SOL)
+                    Revoke Mint (0.025 SOL)
                     <input
                       type="checkbox"
                       checked={revokeMint}
@@ -315,7 +300,7 @@ export default function Home() {
                     <span className={styles.slider}></span>
                   </label>
                   <label className={styles.switchLabel}>
-                    Revoke Freeze 0.05 SOL (Required)
+                    Revoke Freeze 0.025 SOL (Required)
                     <input
                       type="checkbox"
                       checked={revokeFreeze}
@@ -338,7 +323,7 @@ export default function Home() {
                 <div className={styles.selectedToken}>
                   <p>Selected: {selectedMintAddress}</p>
                   <button onClick={revokeExistingMint} className={styles.createButton}>
-                    Revoke Mint (0.05 SOL)
+                    Revoke Mint (0.025 SOL)
                   </button>
                 </div>
               )}
@@ -362,8 +347,8 @@ export default function Home() {
                   <strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").
                 </li>
                 <li>
-                  <strong>Launch Token:</strong> Click "Launch Memecoin" (0.1 SOL). Optionally revoke mint for
-                  an extra 0.05 SOL.
+                  <strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL). Optionally revoke mint for
+                  an extra 0.025 SOL.
                 </li>
                 <li>
                   <strong>Add Liquidity:</strong> Use "Create Liquidity Pool" to head to Raydium and make your
@@ -371,7 +356,7 @@ export default function Home() {
                 </li>
                 <li>
                   <strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," choose a token, and
-                  revoke its mint authority for 0.05 SOL.
+                  revoke its mint authority for 0.025 SOL.
                 </li>
               </ol>
               <p className={styles.guideText}>
@@ -384,7 +369,7 @@ export default function Home() {
               <div className={styles.faqList}>
                 <div className={styles.faqItem}>
                   <h3>What does it cost to launch a token?</h3>
-                  <p>Only 0.1 SOL for creation. Revoking mint adds 0.05 SOL.</p>
+                  <p>Only 0.05 SOL for creation. Revoking mint adds 0.025 SOL.</p>
                 </div>
                 <div className={styles.faqItem}>
                   <h3>Why is revoke freeze mandatory?</h3>
@@ -392,7 +377,7 @@ export default function Home() {
                 </div>
                 <div className={styles.faqItem}>
                   <h3>How do I revoke mint for an existing token?</h3>
-                  <p>Click "Select Token to Revoke," choose your token, and confirm for 0.05 SOL.</p>
+                  <p>Click "Select Token to Revoke," choose your token, and confirm for 0.025 SOL.</p>
                 </div>
                 <div className={styles.faqItem}>
                   <h3>Will my token be on Dexscreener instantly?</h3>
@@ -412,7 +397,7 @@ export default function Home() {
         <section className={styles.features}>
           <h2 className={styles.featureTitle}>Why Memecoins Creator?</h2>
           <div className={styles.featureGrid}>
-            <div className={styles.featureCard}>Cheapest Launch at 0.1 SOL</div>
+            <div className={styles.featureCard}>Cheapest Launch at 0.05 SOL</div>
             <div className={styles.featureCard}>Instant listing on Raydium & Dexscreener</div>
             <div className={styles.featureCard}>No Coding skills required</div>
           </div>
@@ -421,6 +406,12 @@ export default function Home() {
       <footer className={styles.footer}>
         <p>
           © 2025 Memecoins Creator - Powered by <a href="https://solana.com" target="_blank">Solana</a>
+        </p>
+        <p>
+          Need help? Contact support at{' '}
+          <a href="mailto:memecoinscreator2025@gmail.com" target="_blank" rel="noopener noreferrer">
+            memecoinscreator2025@gmail.com
+          </a>
         </p>
       </footer>
     </div>
