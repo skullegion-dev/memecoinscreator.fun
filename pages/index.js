@@ -10,8 +10,8 @@ const WalletMultiButtonDynamic = dynamic(
   { ssr: false }
 );
 
-const FEE_AMOUNT = 0.05 * 10 ** 9; // 0.05 SOL for token creation
-const REVOKE_FEE_AMOUNT = 0.025 * 10 ** 9; // 0.025 SOL for revoke actions
+const FEE_AMOUNT = 0.05 * 10 ** 9;
+const REVOKE_FEE_AMOUNT = 0.025 * 10 ** 9;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
@@ -45,23 +45,33 @@ export default function Home() {
     if (connected && publicKey && wallet?.adapter) {
       console.log('Wallet connected:', publicKey.toBase58());
       console.log('Wallet adapter:', wallet.adapter.name);
-      console.log('signAndSendTransaction:', !!signAndSendTransaction);
-      console.log('signTransaction:', !!signTransaction);
+      console.log('useWallet signAndSendTransaction:', !!signAndSendTransaction);
+      console.log('useWallet signTransaction:', !!signTransaction);
       console.log('Raw wallet adapter methods:', Object.keys(wallet.adapter));
-      setWalletReady(!!signAndSendTransaction || !!signTransaction);
+      setWalletReady(
+        (window.solana && !!window.solana.signAndSendTransaction) ||
+        !!wallet.adapter.signAndSendTransaction ||
+        !!signTransaction
+      );
     } else {
       setWalletReady(false);
     }
   }, [connected, publicKey, wallet, signAndSendTransaction, signTransaction]);
 
   const getSignAndSendTransaction = async () => {
-    if (signAndSendTransaction) {
-      console.log('Signing method selected: signAndSendTransaction from useWallet');
-      return signAndSendTransaction;
+    if (window.solana && window.solana.isPhantom && window.solana.signAndSendTransaction) {
+      console.log('Signing method selected: signAndSendTransaction from window.solana');
+      console.log('window.solana methods:', Object.keys(window.solana));
+      return window.solana.signAndSendTransaction.bind(window.solana);
     }
     if (wallet?.adapter?.signAndSendTransaction) {
       console.log('Signing method selected: signAndSendTransaction from wallet.adapter');
+      console.log('wallet.adapter methods:', Object.keys(wallet.adapter));
       return wallet.adapter.signAndSendTransaction.bind(wallet.adapter);
+    }
+    if (signAndSendTransaction) {
+      console.log('Signing method selected: signAndSendTransaction from useWallet');
+      return signAndSendTransaction;
     }
     if (signTransaction) {
       console.log('Signing method selected: Fallback to signTransaction + sendRawTransaction');
@@ -91,8 +101,10 @@ export default function Home() {
   const createToken = async () => {
     console.log('Debug - connected:', connected);
     console.log('Debug - publicKey:', publicKey?.toBase58() || 'null');
-    console.log('Debug - signAndSendTransaction:', !!signAndSendTransaction);
-    console.log('Debug - signTransaction:', !!signTransaction);
+    console.log('Debug - useWallet signAndSendTransaction:', !!signAndSendTransaction);
+    console.log('Debug - useWallet signTransaction:', !!signTransaction);
+    console.log('Debug - adapter signAndSendTransaction:', !!wallet?.adapter?.signAndSendTransaction);
+    console.log('Debug - window.solana signAndSendTransaction:', window.solana && !!window.solana.signAndSendTransaction);
     console.log('Debug - tokenProgramId:', tokenProgramId?.toBase58() || 'null');
     console.log('Debug - wallet adapter:', wallet?.adapter.name || 'none');
     console.log('Debug - wallet methods:', wallet?.adapter ? Object.keys(wallet.adapter) : 'none');
@@ -290,7 +302,7 @@ export default function Home() {
       <header className={styles.header}>
         <div className={styles.logoContainer}>
           <img src="/elon-powersaw.png" alt="Elon Musk with Powersaw" className={styles.elonImage} />
-          <div className={styles.logo}>Memecoins Creator</div>
+          <div className={styles.logo}>Meme Coins Creator</div>
         </div>
         <WalletMultiButtonDynamic className={styles.walletButton}>
           {connected ? null : 'Connect Wallet'}
@@ -394,7 +406,7 @@ export default function Home() {
           </section>
           <aside className={styles.sidebar}>
             <section className={styles.guide}>
-              <h2 className={styles.guideTitle}>How to Use Memecoins Creator</h2>
+              <h2 className={styles.guideTitle}>How to Use Meme Coins Creator</h2>
               <p className={styles.guideText}>
                 Launch your Solana memecoin in minutes with the cheapest tool around! Here’s how:
               </p>
@@ -438,7 +450,7 @@ export default function Home() {
           </aside>
         </div>
         <section className={styles.features}>
-          <h2 className={styles.featureTitle}>Why Memecoins Creator?</h2>
+          <h2 className={styles.featureTitle}>Why Meme Coins Creator?</h2>
           <div className={styles.featureGrid}>
             <div className={styles.featureCard}>Cheapest Launch at 0.05 SOL</div>
             <div className={styles.featureCard}>Instant listing on Raydium & Dexscreener</div>
@@ -448,7 +460,7 @@ export default function Home() {
       </main>
       <footer className={styles.footer}>
         <p>
-          © 2025 Memecoins Creator - Powered by <a href="https://solana.com" target="_blank">Solana</a>
+          © 2025 Meme Coins Creator - Powered by <a href="https://solana.com" target="_blank">Solana</a>
         </p>
         <p>
           Need help? Contact support at{' '}
