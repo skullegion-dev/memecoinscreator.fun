@@ -2,30 +2,41 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { clusterApiUrl } from '@solana/web3.js';
 import { useMemo } from 'react';
-import Head from 'next/head'; // Still needed for other head elements if added later
-import Script from 'next/script'; // Added for Google Analytics scripts
+import Head from 'next/head';
+import Script from 'next/script';
 import '../styles/globals.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 
 export default function App({ Component, pageProps }) {
-  const network = WalletAdapterNetwork.Mainnet; // Configured for Mainnet
-  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
-  const wallets = useMemo(() => [new PhantomWalletAdapter()], []);
+  const network = WalletAdapterNetwork.Mainnet;
+  // Replace with your QuickNode Mainnet endpoint
+  const endpoint = useMemo(() => 'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/', []);
+  const wallets = useMemo(() => {
+    const phantom = new PhantomWalletAdapter();
+    phantom.on('connect', () => {
+      console.log('Phantom connected:', phantom.publicKey?.toBase58());
+      console.log('Phantom signAndSendTransaction:', !!phantom.signAndSendTransaction);
+    });
+    phantom.on('disconnect', () => console.log('Phantom disconnected'));
+    phantom.on('ready', () => console.log('Phantom readyState:', phantom.readyState));
+    if (phantom.readyState === 'Installed' && !phantom.connected) {
+      phantom.connect().catch((err) => console.error('Phantom auto-connect failed:', err));
+    }
+    return [phantom];
+  }, []);
 
   return (
     <>
       <Head>
-        {/* Optional: Add meta tags or other head elements here if needed */}
+        <title>Meme Coins Creator</title>
+        <meta name="description" content="Launch Solana meme coins for just 0.05 SOL!" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
+      <Script src="https://www.googletagmanager.com/gtag/js?id=G-LQKVMRNG0J" strategy="afterInteractive" />
       <Script
-        src="https://www.googletagmanager.com/gtag/js?id=G-LQKVMRNG0J"
-        strategy="afterInteractive" // Loads after page is interactive
-      />
-      <Script
-        id="google-analytics" // Unique ID for the inline script
-        strategy="afterInteractive" // Loads after page is interactive
+        id="google-analytics"
+        strategy="afterInteractive"
         dangerouslySetInnerHTML={{
           __html: `
             window.dataLayer = window.dataLayer || [];
