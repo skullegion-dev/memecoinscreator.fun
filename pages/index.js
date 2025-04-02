@@ -51,11 +51,21 @@ export default function Home() {
 
   const getSignAndSendTransaction = async () => {
     if (signAndSendTransaction) {
-      return signAndSendTransaction;
+      return async (transaction, options) => {
+        const { signature } = await signAndSendTransaction(transaction, options);
+        return { signature };
+      };
     }
     if (signTransaction) {
-      return async (transaction) => {
+      return async (transaction, options) => {
+        // Sign with wallet first
         const signedTx = await signTransaction(transaction);
+        // Apply additional signer signatures (e.g., mintKeypair)
+        if (options?.signers?.length > 0) {
+          options.signers.forEach((signer) => {
+            signedTx.partialSign(signer);
+          });
+        }
         const signature = await connection.sendRawTransaction(signedTx.serialize());
         return { signature };
       };
@@ -80,6 +90,11 @@ export default function Home() {
   const createToken = async () => {
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
+      return;
+    }
+
+    if (!tokenName || !tokenSymbol || !supply || supply <= 0) {
+      setStatus('Please fill in all token details with valid values!');
       return;
     }
 
@@ -145,7 +160,7 @@ export default function Home() {
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       const mintAddr = mintKeypair.publicKey.toBase58();
       setMintAddress(mintAddr);
-      setStatus(`Token created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
+      setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
     } catch (error) {
       console.error('Token creation error:', error);
       setStatus(`Error: ${error.message}`);
@@ -203,12 +218,12 @@ export default function Home() {
       setStatus('Connect your wallet to select a token to revoke!');
       return;
     }
-    setStatus('Please select a token from your wallet (feature coming soon).');
+    setStatus('Please enter a mint address manually (feature coming soon).');
   };
 
   const revokeExistingMint = async () => {
     if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
-      setStatus('Connect wallet and select a token to revoke!');
+      setStatus('Connect wallet and enter a mint address to revoke!');
       return;
     }
 
