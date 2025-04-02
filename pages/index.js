@@ -58,9 +58,7 @@ export default function Home() {
     }
     if (signTransaction) {
       return async (transaction, options) => {
-        // Sign with wallet first
         const signedTx = await signTransaction(transaction);
-        // Apply additional signer signatures (e.g., mintKeypair)
         if (options?.signers?.length > 0) {
           options.signers.forEach((signer) => {
             signedTx.partialSign(signer);
@@ -88,7 +86,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    if (!walletReady || !connected || !publicKey || !tokenProgramId) {
+    if (!walletReady || !connected || !publicKey || !WITtokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       return;
     }
@@ -130,8 +128,10 @@ export default function Home() {
           lamports,
           programId: tokenProgramId,
         }),
-        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId),
+        // Initialize mint with freeze authority set to publicKey
+        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, publicKey, tokenProgramId),
         SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+        // Revoke freeze authority immediately after
         createSetAuthorityInstruction(
           mintKeypair.publicKey,
           publicKey,
