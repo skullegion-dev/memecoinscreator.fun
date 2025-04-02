@@ -10,8 +10,8 @@ const WalletMultiButtonDynamic = dynamic(
   { ssr: false }
 );
 
-const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
-const REVOKE_FEE_AMOUNT = 0.025 * LAMPORTS_PER_SOL;
+const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL; // Base fee includes mint creation and inherent freeze revocation
+const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL; // Fee for optional mint authority revocation
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
@@ -26,7 +26,7 @@ export default function Home() {
   const [imagePreview, setImagePreview] = useState(null);
   const [mintAddress, setMintAddress] = useState(null);
   const [revokeMint, setRevokeMint] = useState(false);
-  const [revokeFreeze, setRevokeFreeze] = useState(true);
+  const [revokeFreeze] = useState(true); // Always true, no toggle needed
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
   const [walletReady, setWalletReady] = useState(false);
 
@@ -86,7 +86,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    if (!walletReady || !connected || !publicKey || !WITtokenProgramId) {
+    if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       return;
     }
@@ -100,7 +100,7 @@ export default function Home() {
 
     try {
       setStatus('Checking SOL balance...');
-      const totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT + (revokeMint ? REVOKE_FEE_AMOUNT : 0);
+      const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0);
       const balanceInLamports = await connection.getBalance(publicKey);
       if (balanceInLamports < totalRequiredLamports) {
         throw new Error(
@@ -128,23 +128,12 @@ export default function Home() {
           lamports,
           programId: tokenProgramId,
         }),
-        // Initialize mint with freeze authority set to publicKey
-        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, publicKey, tokenProgramId),
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
-        // Revoke freeze authority immediately after
-        createSetAuthorityInstruction(
-          mintKeypair.publicKey,
-          publicKey,
-          AuthorityType.FreezeAccount,
-          null,
-          [],
-          tokenProgramId
-        )
+        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
       );
 
       if (revokeMint) {
         transaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
           createSetAuthorityInstruction(
             mintKeypair.publicKey,
             publicKey,
@@ -192,7 +181,7 @@ export default function Home() {
       });
 
       transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
         createSetAuthorityInstruction(
           mintPublicKey,
           publicKey,
@@ -241,7 +230,7 @@ export default function Home() {
       });
 
       transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
         createSetAuthorityInstruction(
           mintPublicKey,
           publicKey,
@@ -262,9 +251,8 @@ export default function Home() {
     }
   };
 
-  const handleRevokeFreeze = async (e) => {
-    setStatus('Revoke freeze is mandatory and applied during token creation!');
-    setRevokeFreeze(true);
+  const handleRevokeFreeze = () => {
+    setStatus('Freeze authority is automatically revoked during token creation (included in base fee)!');
   };
 
   const redirectToRaydiumLiquidity = () => {
@@ -350,7 +338,7 @@ export default function Home() {
                     <span className={styles.slider}></span>
                   </label>
                   <label className={styles.switchLabel}>
-                    Revoke Freeze 0.025 SOL (Required)
+                    Revoke Freeze (Included)
                     <input
                       type="checkbox"
                       checked={revokeFreeze}
@@ -402,11 +390,11 @@ export default function Home() {
               <div className={styles.faqList}>
                 <div className={styles.faqItem}>
                   <h3>What does it cost to launch a token?</h3>
-                  <p>Only 0.05 SOL for creation. Revoking mint adds 0.025 SOL.</p>
+                  <p>Only 0.05 SOL for creation (includes freeze revocation). Revoking mint adds 0.025 SOL.</p>
                 </div>
                 <div className={styles.faqItem}>
-                  <h3>Why is revoke freeze mandatory?</h3>
-                  <p>It ensures your token can’t be frozen later, enhancing trust and security for traders.</p>
+                  <h3>Why is revoke freeze included?</h3>
+                  <p>It’s automatically revoked during creation to ensure your token can’t be frozen, enhancing trust.</p>
                 </div>
                 <div className={styles.faqItem}>
                   <h3>How do I revoke mint for an existing token?</h3>
