@@ -280,7 +280,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL!</h1>
+            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL !</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
