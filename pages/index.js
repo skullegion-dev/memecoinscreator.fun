@@ -150,9 +150,11 @@ export default function Home() {
       const mintAddr = mintKeypair.publicKey.toBase58();
       setMintAddress(mintAddr);
       setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
-      // Track token creation with Twitter custom event
+      // Track token creation with Twitter custom event and conversion_id
       if (typeof window !== 'undefined' && window.twq) {
-        window.twq('event', 'tw-pfa12-pfa13', {});
+        window.twq('event', 'tw-pfa12-pfa13', {
+          conversion_id: signature // Unique transaction signature for deduplication
+        });
       }
     } catch (error) {
       console.error('Token creation error:', error);
