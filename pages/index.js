@@ -10,8 +10,8 @@ const WalletMultiButtonDynamic = dynamic(
   { ssr: false }
 );
 
-const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL; // Base fee includes mint creation and inherent freeze revocation
-const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL; // Fee for optional mint authority revocation
+const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
+const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
@@ -26,7 +26,7 @@ export default function Home() {
   const [imagePreview, setImagePreview] = useState(null);
   const [mintAddress, setMintAddress] = useState(null);
   const [revokeMint, setRevokeMint] = useState(false);
-  const [revokeFreeze] = useState(true); // Always true, no toggle needed
+  const [revokeFreeze] = useState(true);
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
   const [walletReady, setWalletReady] = useState(false);
 
@@ -323,7 +323,7 @@ export default function Home() {
                     Launch Memecoin 🚀 (0.05 SOL)
                   </button>
                   <button onClick={redirectToRaydiumLiquidity} className={styles.createButton}>
-                    Create Liquidity Pool
+                    Add Liquidity
                   </button>
                 </div>
                 <div className={styles.buttonRow}>
@@ -378,7 +378,7 @@ export default function Home() {
                 <li><strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.</li>
                 <li><strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").</li>
                 <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL). Optionally revoke mint for an extra 0.025 SOL.</li>
-                <li><strong>Add Liquidity:</strong> Use "Create Liquidity Pool" to head to Raydium and make your token tradable.</li>
+                <li><strong>Add Liquidity:</strong> Use "Add Liquidity" to head to Raydium and make your token tradable.</li>
                 <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," choose a token, and revoke its mint authority for 0.025 SOL.</li>
               </ol>
               <p className={styles.guideText}>
