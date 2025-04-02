@@ -10,8 +10,8 @@ const WalletMultiButtonDynamic = dynamic(
   { ssr: false }
 );
 
-const FEE_AMOUNT = 0.05 * 10 ** 9;
-const REVOKE_FEE_AMOUNT = 0.025 * 10 ** 9;
+const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
+const REVOKE_FEE_AMOUNT = 0.025 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 
 export default function Home() {
@@ -43,39 +43,18 @@ export default function Home() {
 
   useEffect(() => {
     if (connected && publicKey && wallet?.adapter) {
-      console.log('Wallet connected:', publicKey.toBase58());
-      console.log('Wallet adapter:', wallet.adapter.name);
-      console.log('useWallet signAndSendTransaction:', !!signAndSendTransaction);
-      console.log('useWallet signTransaction:', !!signTransaction);
-      console.log('Raw wallet adapter methods:', Object.keys(wallet.adapter));
-      setWalletReady(
-        (window.solana && !!window.solana.signAndSendTransaction) ||
-        !!wallet.adapter.signAndSendTransaction ||
-        !!signTransaction
-      );
+      setWalletReady(!!signAndSendTransaction || !!signTransaction);
     } else {
       setWalletReady(false);
     }
   }, [connected, publicKey, wallet, signAndSendTransaction, signTransaction]);
 
   const getSignAndSendTransaction = async () => {
-    if (window.solana && window.solana.isPhantom && window.solana.signAndSendTransaction) {
-      console.log('Signing method selected: signAndSendTransaction from window.solana');
-      console.log('window.solana methods:', Object.keys(window.solana));
-      return window.solana.signAndSendTransaction.bind(window.solana);
-    }
-    if (wallet?.adapter?.signAndSendTransaction) {
-      console.log('Signing method selected: signAndSendTransaction from wallet.adapter');
-      console.log('wallet.adapter methods:', Object.keys(wallet.adapter));
-      return wallet.adapter.signAndSendTransaction.bind(wallet.adapter);
-    }
     if (signAndSendTransaction) {
-      console.log('Signing method selected: signAndSendTransaction from useWallet');
       return signAndSendTransaction;
     }
     if (signTransaction) {
-      console.log('Signing method selected: Fallback to signTransaction + sendRawTransaction');
-      return async (transaction, options) => {
+      return async (transaction) => {
         const signedTx = await signTransaction(transaction);
         const signature = await connection.sendRawTransaction(signedTx.serialize());
         return { signature };
@@ -99,73 +78,45 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Debug - connected:', connected);
-    console.log('Debug - publicKey:', publicKey?.toBase58() || 'null');
-    console.log('Debug - useWallet signAndSendTransaction:', !!signAndSendTransaction);
-    console.log('Debug - useWallet signTransaction:', !!signTransaction);
-    console.log('Debug - adapter signAndSendTransaction:', !!wallet?.adapter?.signAndSendTransaction);
-    console.log('Debug - window.solana signAndSendTransaction:', window.solana && !!window.solana.signAndSendTransaction);
-    console.log('Debug - tokenProgramId:', tokenProgramId?.toBase58() || 'null');
-    console.log('Debug - wallet adapter:', wallet?.adapter.name || 'none');
-    console.log('Debug - wallet methods:', wallet?.adapter ? Object.keys(wallet.adapter) : 'none');
-
-    if (!walletReady) {
-      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+    if (!walletReady || !connected || !publicKey || !tokenProgramId) {
+      setStatus('Please connect your wallet to Mainnet!');
       return;
     }
 
     const signAndSend = await getSignAndSendTransaction();
 
-    if (!connected || !publicKey || !signAndSend || !tokenProgramId) {
-      let errorMsg = 'Connect your wallet to Mainnet and blast off for just 0.05 SOL!';
-      if (!connected) errorMsg = 'Wallet not connected! Please reconnect.';
-      else if (!publicKey) errorMsg = 'No public key detected! Reconnect wallet.';
-      else if (!signAndSend) errorMsg = 'No signing method available! Reload or update Phantom.';
-      else if (!tokenProgramId) errorMsg = 'Token program ID not initialized!';
-      setStatus(errorMsg);
-      return;
-    }
     try {
       setStatus('Checking SOL balance...');
-      let totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT;
-      if (revokeMint) totalRequiredLamports += REVOKE_FEE_AMOUNT;
-      const totalRequiredSOL = totalRequiredLamports / LAMPORTS_PER_SOL;
-      let balanceInLamports;
-      try {
-        balanceInLamports = await connection.getBalance(publicKey);
-      } catch (rpcError) {
-        throw new Error(`RPC error fetching balance: ${rpcError.message}`);
-      }
-      const balanceInSOL = balanceInLamports / LAMPORTS_PER_SOL;
+      const totalRequiredLamports = FEE_AMOUNT + REVOKE_FEE_AMOUNT + (revokeMint ? REVOKE_FEE_AMOUNT : 0);
+      const balanceInLamports = await connection.getBalance(publicKey);
       if (balanceInLamports < totalRequiredLamports) {
         throw new Error(
-          `Insufficient SOL: You have ${balanceInSOL.toFixed(4)} SOL, but ${totalRequiredSOL.toFixed(4)} SOL is required.`
+          `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
         );
       }
-      setStatus('Launching the cheapest Solana token for 0.05 SOL...');
+
+      setStatus('Creating token...');
       const mintKeypair = Keypair.generate();
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
       const lamports = await connection.getMinimumBalanceForRentExemption(82);
-      const transaction = new Transaction();
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: publicKey,
+      });
+
       transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
-      );
-      transaction.add(
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT }),
         SystemProgram.createAccount({
           fromPubkey: publicKey,
           newAccountPubkey: mintKeypair.publicKey,
           space: 82,
           lamports,
           programId: tokenProgramId,
-        })
-      );
-      transaction.add(
-        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
-      );
-      transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT })
-      );
-      transaction.add(
+        }),
+        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId),
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
         createSetAuthorityInstruction(
           mintKeypair.publicKey,
           publicKey,
@@ -175,11 +126,10 @@ export default function Home() {
           tokenProgramId
         )
       );
+
       if (revokeMint) {
         transaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT })
-        );
-        transaction.add(
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
           createSetAuthorityInstruction(
             mintKeypair.publicKey,
             publicKey,
@@ -190,16 +140,15 @@ export default function Home() {
           )
         );
       }
+
       const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
-      await connection.confirmTransaction(signature, 'confirmed');
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       const mintAddr = mintKeypair.publicKey.toBase58();
       setMintAddress(mintAddr);
-      setStatus(
-        `Token launched for 0.05 SOL + 0.025 SOL revoke freeze${revokeMint ? ' + 0.025 SOL revoke mint' : ''}! Live on Raydium & Dexscreener: ${mintAddr} 🚀`
-      );
+      setStatus(`Token created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
     } catch (error) {
       console.error('Token creation error:', error);
-      setStatus(`Error: ${error.message} - Retry for 0.05 SOL!`);
+      setStatus(`Error: ${error.message}`);
     }
   };
 
@@ -208,33 +157,40 @@ export default function Home() {
     setRevokeMint(isChecked);
     if (!isChecked || !mintAddress) return;
 
-    if (!walletReady) {
-      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+    if (!walletReady || !connected || !publicKey) {
+      setStatus('Wallet not ready! Please reconnect.');
       setRevokeMint(false);
       return;
     }
 
     const signAndSend = await getSignAndSendTransaction();
 
-    if (!connected || !publicKey || !signAndSend) {
-      setStatus('Reconnect wallet to revoke mint for just 0.025 SOL!');
-      setRevokeMint(false);
-      return;
-    }
     try {
-      setStatus('Revoking mint authority (0.025 SOL fee)...');
+      setStatus('Revoking mint authority...');
       const mintPublicKey = new PublicKey(mintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
-      const transaction = new Transaction();
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: publicKey,
+      });
+
       transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT })
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+        createSetAuthorityInstruction(
+          mintPublicKey,
+          publicKey,
+          AuthorityType.MintTokens,
+          null,
+          [],
+          tokenProgramId
+        )
       );
-      transaction.add(
-        createSetAuthorityInstruction(mintPublicKey, publicKey, AuthorityType.MintTokens, null, [], tokenProgramId)
-      );
+
       const { signature } = await signAndSend(transaction, { signers: [] });
-      await connection.confirmTransaction(signature, 'confirmed');
-      setStatus('Mint authority revoked - Locked and loaded for the cheapest hype!');
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      setStatus('Mint authority revoked!');
     } catch (error) {
       console.error('Revoke mint error:', error);
       setStatus(`Error revoking mint: ${error.message}`);
@@ -247,48 +203,52 @@ export default function Home() {
       setStatus('Connect your wallet to select a token to revoke!');
       return;
     }
-    setStatus('Please select a token from your wallet.');
+    setStatus('Please select a token from your wallet (feature coming soon).');
   };
 
   const revokeExistingMint = async () => {
-    if (!walletReady) {
-      setStatus('Wallet not fully initialized! Please reconnect and try again.');
+    if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
+      setStatus('Connect wallet and select a token to revoke!');
       return;
     }
 
     const signAndSend = await getSignAndSendTransaction();
 
-    if (!connected || !publicKey || !signAndSend || !tokenProgramId) {
-      setStatus('Connect your wallet to revoke mint for an existing token (0.025 SOL)!');
-      return;
-    }
-    if (!selectedMintAddress) {
-      setStatus('Please select a token to revoke its mint authority!');
-      return;
-    }
     try {
-      setStatus('Revoking mint authority for selected token (0.025 SOL fee)...');
+      setStatus('Revoking mint authority for selected token...');
       const mintPublicKey = new PublicKey(selectedMintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
-      const transaction = new Transaction();
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: publicKey,
+      });
+
       transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT })
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_FEE_AMOUNT }),
+        createSetAuthorityInstruction(
+          mintPublicKey,
+          publicKey,
+          AuthorityType.MintTokens,
+          null,
+          [],
+          tokenProgramId
+        )
       );
-      transaction.add(
-        createSetAuthorityInstruction(mintPublicKey, publicKey, AuthorityType.MintTokens, null, [], tokenProgramId)
-      );
+
       const { signature } = await signAndSend(transaction, { signers: [] });
-      await connection.confirmTransaction(signature, 'confirmed');
-      setStatus(`Mint authority revoked for ${selectedMintAddress} - Secured for just 0.025 SOL!`);
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      setStatus(`Mint authority revoked for ${selectedMintAddress}!`);
       setSelectedMintAddress('');
     } catch (error) {
       console.error('Revoke existing mint error:', error);
-      setStatus(`Error revoking mint for selected token: ${error.message}`);
+      setStatus(`Error: ${error.message}`);
     }
   };
 
   const handleRevokeFreeze = async (e) => {
-    setStatus('Revoke freeze is mandatory and already applied during token launch for 0.025 SOL!');
+    setStatus('Revoke freeze is mandatory and applied during token creation!');
     setRevokeFreeze(true);
   };
 
@@ -311,7 +271,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL !</h1>
+            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL!</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
