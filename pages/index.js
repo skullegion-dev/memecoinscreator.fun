@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
-import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType } from '@solana/spl-token';
 import styles from '../styles/Home.module.css';
 
@@ -13,6 +13,7 @@ const WalletMultiButtonDynamic = dynamic(
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
+const BLOCKHASH_EXPIRY_MS = 60000; // 60 seconds timeout for blockhash freshness
 
 export default function Home() {
   const { connection } = useConnection();
@@ -97,68 +98,95 @@ export default function Home() {
     }
 
     const signAndSend = await getSignAndSendTransaction();
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    try {
-      setStatus('Checking SOL balance...');
-      const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0);
-      const balanceInLamports = await connection.getBalance(publicKey);
-      if (balanceInLamports < totalRequiredLamports) {
-        throw new Error(
-          `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
-        );
-      }
+    while (attempts < maxAttempts) {
+      try {
+        setStatus('Checking SOL balance...');
+        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0);
+        const balanceInLamports = await connection.getBalance(publicKey);
+        if (balanceInLamports < totalRequiredLamports) {
+          throw new Error(
+            `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
+          );
+        }
 
-      setStatus('Creating token...');
-      const mintKeypair = Keypair.generate();
-      const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
-      const lamports = await connection.getMinimumBalanceForRentExemption(82);
+        setStatus('Creating token...');
+        const mintKeypair = Keypair.generate();
+        const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
+        const lamports = await connection.getMinimumBalanceForRentExemption(82);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-      const transaction = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: publicKey,
-      });
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        const blockhashTimestamp = Date.now();
 
-      transaction.add(
-        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT }),
-        SystemProgram.createAccount({
-          fromPubkey: publicKey,
-          newAccountPubkey: mintKeypair.publicKey,
-          space: 82,
-          lamports,
-          programId: tokenProgramId,
-        }),
-        createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
-      );
-
-      if (revokeMint) {
-        transaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
-          createSetAuthorityInstruction(
-            mintKeypair.publicKey,
-            publicKey,
-            AuthorityType.MintTokens,
-            null,
-            [],
-            tokenProgramId
-          )
-        );
-      }
-
-      const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
-      const mintAddr = mintKeypair.publicKey.toBase58();
-      setMintAddress(mintAddr);
-      setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
-      // Track token creation with Twitter custom event and conversion_id
-      if (typeof window !== 'undefined' && window.twq) {
-        window.twq('event', 'tw-pfa12-pfa13', {
-          conversion_id: signature // Unique transaction signature for deduplication
+        const transaction = new Transaction({
+          recentBlockhash: blockhash,
+          feePayer: publicKey,
         });
+
+        transaction.add(
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT }),
+          SystemProgram.createAccount({
+            fromPubkey: publicKey,
+            newAccountPubkey: mintKeypair.publicKey,
+            space: 82,
+            lamports,
+            programId: tokenProgramId,
+          }),
+          createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
+        );
+
+        if (revokeMint) {
+          transaction.add(
+            SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
+            createSetAuthorityInstruction(
+              mintKeypair.publicKey,
+              publicKey,
+              AuthorityType.MintTokens,
+              null,
+              [],
+              tokenProgramId
+            )
+          );
+        }
+
+        // Check if blockhash is still fresh before sending
+        if (Date.now() - blockhashTimestamp > BLOCKHASH_EXPIRY_MS) {
+          throw new Error('Blockhash expired before transaction submission');
+        }
+
+        const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
+        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+        const mintAddr = mintKeypair.publicKey.toBase58();
+        setMintAddress(mintAddr);
+        setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
+
+        // Track token creation with Twitter custom event
+        if (typeof window !== 'undefined' && window.twq) {
+          window.twq('event', 'tw-pfa12-pfa13', {
+            conversion_id: signature
+          });
+        }
+        return; // Success, exit the loop
+      } catch (error) {
+        attempts++;
+        if (error instanceof SendTransactionError) {
+          const logs = await error.getLogs(connection);
+          console.error('Transaction simulation failed. Logs:', logs);
+          setStatus(`Error: Transaction simulation failed - ${error.message}. Logs: ${logs.join(', ')}`);
+        } else {
+          console.error('Token creation error:', error);
+          setStatus(`Error: ${error.message}`);
+        }
+
+        if (attempts === maxAttempts) {
+          setStatus(`Failed after ${maxAttempts} attempts: ${error.message}`);
+          return;
+        }
+        setStatus(`Retrying (${attempts}/${maxAttempts}) due to blockhash issue...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before retry
       }
-    } catch (error) {
-      console.error('Token creation error:', error);
-      setStatus(`Error: ${error.message}`);
     }
   };
 
