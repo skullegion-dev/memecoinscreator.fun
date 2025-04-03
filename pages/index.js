@@ -13,7 +13,7 @@ const WalletMultiButtonDynamic = dynamic(
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
-const BLOCKHASH_EXPIRY_MS = 60000; // 60 seconds timeout for blockhash freshness
+const BLOCKHASH_EXPIRY_MS = 60000;
 
 export default function Home() {
   const { connection } = useConnection();
@@ -151,7 +151,6 @@ export default function Home() {
           );
         }
 
-        // Check if blockhash is still fresh before sending
         if (Date.now() - blockhashTimestamp > BLOCKHASH_EXPIRY_MS) {
           throw new Error('Blockhash expired before transaction submission');
         }
@@ -168,7 +167,13 @@ export default function Home() {
             conversion_id: signature
           });
         }
-        return; // Success, exit the loop
+
+        // Track token creation with Google Ads conversion
+        if (typeof window !== 'undefined' && window.gtag_report_conversion) {
+          window.gtag_report_conversion(); // No URL redirect needed
+        }
+
+        return;
       } catch (error) {
         attempts++;
         if (error instanceof SendTransactionError) {
@@ -185,7 +190,7 @@ export default function Home() {
           return;
         }
         setStatus(`Retrying (${attempts}/${maxAttempts}) due to blockhash issue...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
   };
@@ -308,7 +313,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL !</h1>
+            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL!</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
