@@ -43,7 +43,21 @@ export default function App({ Component, pageProps }) {
           `,
         }}
       />
-      {/* X Pixel (Twitter Pixel) */}
+      {/* Google Ads Tag */}
+      <Script src="https://www.googletagmanager.com/gtag/js?id=AW-16974377388" strategy="afterInteractive" />
+      <Script
+        id="google-ads"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{
+          __html: `
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'AW-16974377388');
+          `,
+        }}
+      />
+      {/* Twitter Pixel */}
       <Script
         id="twitter-pixel"
         strategy="afterInteractive"
