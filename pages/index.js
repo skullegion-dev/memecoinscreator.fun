@@ -99,23 +99,28 @@ export default function Home() {
   };
 
   const createToken = async () => {
+    console.log('Running updated createToken with tokenCreated flag - v3');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
+      console.log('Wallet not ready or not connected');
       return;
     }
 
     if (!tokenName || !tokenSymbol || !supply || supply <= 0) {
       setStatus('Please fill in all token details with valid values!');
+      console.log('Invalid token details');
       return;
     }
 
     const signAndSend = await getSignAndSendTransaction();
     let attempts = 0;
     const maxAttempts = 3;
+    let tokenCreated = false;
 
     while (attempts < maxAttempts) {
       try {
         setStatus('Checking SOL balance...');
+        console.log('Checking SOL balance...');
         const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0);
         const balanceInLamports = await connection.getBalance(publicKey);
         if (balanceInLamports < totalRequiredLamports) {
@@ -125,6 +130,7 @@ export default function Home() {
         }
 
         setStatus('Creating token...');
+        console.log('Creating token...');
         const mintKeypair = Keypair.generate();
         const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
         const lamports = await connection.getMinimumBalanceForRentExemption(82);
@@ -172,28 +178,31 @@ export default function Home() {
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
         setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
+        console.log(`Token "${tokenName}" created! Mint: ${mintAddr}`);
+        tokenCreated = true;
 
-        // Track Google Ads conversion only on success
-        const solPrice = await fetchSolPrice();
-        const value = solPrice ? 0.05 * solPrice : 0.05; // Convert 0.05 SOL to USD if possible
-        const currency = solPrice ? 'USD' : 'SOL';
+        if (tokenCreated) {
+          const solPrice = await fetchSolPrice();
+          const value = solPrice ? 0.05 * solPrice : 0.05;
+          const currency = solPrice ? 'USD' : 'SOL';
 
-        if (typeof window !== 'undefined' && window.gtag) {
-          window.gtag('event', 'conversion', {
-            send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
-            transaction_id: signature,
-            value: value,
-            currency: currency,
-          });
-          console.log('Google Ads conversion tracked:', {
-            send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
-            transaction_id: signature,
-            value: value,
-            currency: currency,
-          });
-        } else {
-          console.error('Google gtag not available - conversion tracking failed');
-          setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`);
+          if (typeof window !== 'undefined' && window.gtag) {
+            window.gtag('event', 'conversion', {
+              send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
+              transaction_id: signature,
+              value: value,
+              currency: currency,
+            });
+            console.log('Google Ads conversion tracked:', {
+              send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
+              transaction_id: signature,
+              value: value,
+              currency: currency,
+            });
+          } else {
+            console.error('Google gtag not available - conversion tracking failed');
+            setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`);
+          }
         }
 
         return;
@@ -210,9 +219,11 @@ export default function Home() {
 
         if (attempts === maxAttempts) {
           setStatus(`Failed after ${maxAttempts} attempts: ${error.message}`);
+          console.log(`Failed after ${maxAttempts} attempts`);
           return;
         }
         setStatus(`Retrying (${attempts}/${maxAttempts}) due to blockhash issue...`);
+        console.log(`Retrying (${attempts}/${maxAttempts})`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
@@ -233,6 +244,7 @@ export default function Home() {
 
     try {
       setStatus('Revoking mint authority...');
+      console.log('Revoking mint authority...');
       const mintPublicKey = new PublicKey(mintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
 
@@ -257,6 +269,7 @@ export default function Home() {
       const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus('Mint authority revoked!');
+      console.log('Mint authority revoked!');
     } catch (error) {
       console.error('Revoke mint error:', error);
       setStatus(`Error revoking mint: ${error.message}`);
@@ -267,14 +280,17 @@ export default function Home() {
   const selectTokenToRevoke = () => {
     if (!connected || !publicKey) {
       setStatus('Connect your wallet to select a token to revoke!');
+      console.log('Wallet not connected for revoke selection');
       return;
     }
     setStatus('Please enter a mint address manually (feature coming soon).');
+    console.log('Manual mint address entry prompted');
   };
 
   const revokeExistingMint = async () => {
     if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
       setStatus('Connect wallet and enter a mint address to revoke!');
+      console.log('Invalid revoke conditions');
       return;
     }
 
@@ -282,6 +298,7 @@ export default function Home() {
 
     try {
       setStatus('Revoking mint authority for selected token...');
+      console.log('Revoking mint authority for selected token...');
       const mintPublicKey = new PublicKey(selectedMintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
 
@@ -306,6 +323,7 @@ export default function Home() {
       const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus(`Mint authority revoked for ${selectedMintAddress}!`);
+      console.log(`Mint authority revoked for ${selectedMintAddress}!`);
       setSelectedMintAddress('');
     } catch (error) {
       console.error('Revoke existing mint error:', error);
@@ -315,11 +333,13 @@ export default function Home() {
 
   const handleRevokeFreeze = () => {
     setStatus('Freeze authority is automatically revoked during token creation (included in base fee)!');
+    console.log('Freeze authority revocation info displayed');
   };
 
   const redirectToRaydiumLiquidity = () => {
     const raydiumUrl = 'https://raydium.io/liquidity/';
     window.open(raydiumUrl, '_blank');
+    console.log('Redirected to Raydium liquidity');
   };
 
   return (
@@ -336,7 +356,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL !</h1>
+            <h1 className={styles.title}>Launch Solana Tokens for Just 0.05 SOL!</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
