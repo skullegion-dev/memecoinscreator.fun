@@ -17,7 +17,7 @@ const BLOCKHASH_EXPIRY_MS = 60000;
 
 export default function Home() {
   const { connection } = useConnection();
-  const { publicKey, connected, wallet, signAndSendTransaction } = useWallet();
+  const { publicKey, signAndSendTransaction, signTransaction, connected, wallet } = useWallet();
   const [tokenName, setTokenName] = useState('');
   const [tokenSymbol, setTokenSymbol] = useState('');
   const [supply, setSupply] = useState('');
@@ -43,19 +43,34 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (connected && publicKey && wallet?.adapter && signAndSendTransaction) {
-      setWalletReady(true);
-      console.log('Wallet ready:', publicKey.toBase58());
-      console.log('signAndSendTransaction available:', !!signAndSendTransaction);
+    if (connected && publicKey && wallet?.adapter) {
+      setWalletReady(!!signAndSendTransaction || !!signTransaction);
     } else {
       setWalletReady(false);
-      console.log('Wallet not ready');
-      console.log('Connected:', connected);
-      console.log('PublicKey:', publicKey?.toBase58() || 'null');
-      console.log('Wallet adapter:', !!wallet?.adapter);
-      console.log('signAndSendTransaction:', !!signAndSendTransaction);
     }
-  }, [connected, publicKey, wallet, signAndSendTransaction]);
+  }, [connected, publicKey, wallet, signAndSendTransaction, signTransaction]);
+
+  const getSignAndSendTransaction = async () => {
+    if (signAndSendTransaction) {
+      return async (transaction, options) => {
+        const { signature } = await signAndSendTransaction(transaction, options);
+        return { signature };
+      };
+    }
+    if (signTransaction) {
+      return async (transaction, options) => {
+        const signedTx = await signTransaction(transaction);
+        if (options?.signers?.length > 0) {
+          options.signers.forEach((signer) => {
+            signedTx.partialSign(signer);
+          });
+        }
+        const signature = await connection.sendRawTransaction(signedTx.serialize());
+        return { signature };
+      };
+    }
+    throw new Error('No transaction signing method available');
+  };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -79,14 +94,14 @@ export default function Home() {
       return data.solana.usd;
     } catch (error) {
       console.error('Failed to fetch SOL price:', error);
-      return null;
+      return null; // Fallback to SOL if fetch fails
     }
   };
 
   const createToken = async () => {
-    console.log('Running updated createToken with signAndSendTransaction - v4');
-    if (!walletReady || !connected || !publicKey || !tokenProgramId || !signAndSendTransaction) {
-      setStatus('Please install and connect a Solana wallet like Phantom!');
+    console.log('Running updated createToken with tokenCreated flag - v3');
+    if (!walletReady || !connected || !publicKey || !tokenProgramId) {
+      setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
       return;
     }
@@ -97,6 +112,7 @@ export default function Home() {
       return;
     }
 
+    const signAndSend = await getSignAndSendTransaction();
     let attempts = 0;
     const maxAttempts = 3;
     let tokenCreated = false;
@@ -157,10 +173,7 @@ export default function Home() {
           throw new Error('Blockhash expired before transaction submission');
         }
 
-        const { signature } = await signAndSendTransaction(transaction, {
-          signers: [mintKeypair],
-          skipPreflight: false,
-        });
+        const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
@@ -186,6 +199,9 @@ export default function Home() {
               value: value,
               currency: currency,
             });
+          } else {
+            console.error('Google gtag not available - conversion tracking failed');
+            setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`);
           }
         }
 
@@ -218,11 +234,13 @@ export default function Home() {
     setRevokeMint(isChecked);
     if (!isChecked || !mintAddress) return;
 
-    if (!walletReady || !connected || !publicKey || !signAndSendTransaction) {
-      setStatus('Please connect your wallet to proceed!');
+    if (!walletReady || !connected || !publicKey) {
+      setStatus('Wallet not ready! Please reconnect.');
       setRevokeMint(false);
       return;
     }
+
+    const signAndSend = await getSignAndSendTransaction();
 
     try {
       setStatus('Revoking mint authority...');
@@ -248,9 +266,7 @@ export default function Home() {
         )
       );
 
-      const { signature } = await signAndSendTransaction(transaction, {
-        skipPreflight: false,
-      });
+      const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus('Mint authority revoked!');
       console.log('Mint authority revoked!');
@@ -272,11 +288,13 @@ export default function Home() {
   };
 
   const revokeExistingMint = async () => {
-    if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress || !signAndSendTransaction) {
+    if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
       setStatus('Connect wallet and enter a mint address to revoke!');
       console.log('Invalid revoke conditions');
       return;
     }
+
+    const signAndSend = await getSignAndSendTransaction();
 
     try {
       setStatus('Revoking mint authority for selected token...');
@@ -302,9 +320,7 @@ export default function Home() {
         )
       );
 
-      const { signature } = await signAndSendTransaction(transaction, {
-        skipPreflight: false,
-      });
+      const { signature } = await signAndSend(transaction, { signers: [] });
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus(`Mint authority revoked for ${selectedMintAddress}!`);
       console.log(`Mint authority revoked for ${selectedMintAddress}!`);
