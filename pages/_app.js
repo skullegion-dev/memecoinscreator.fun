@@ -9,7 +9,8 @@ import '../styles/globals.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 
 export default function App({ Component, pageProps }) {
-  const network = WalletAdapterNetwork.Mainnet; // Switch to Devnet for testing
+  // Use Mainnet for production
+  const network = WalletAdapterNetwork.Mainnet;
   const endpoint = useMemo(
     () => 'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/',
     []
