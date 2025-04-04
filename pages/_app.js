@@ -9,14 +9,12 @@ import '../styles/globals.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 
 export default function App({ Component, pageProps }) {
-  // Solana network and endpoint setup
-  const network = WalletAdapterNetwork.Mainnet;
+  const network = WalletAdapterNetwork.Mainnet; // Switch to Devnet for testing
   const endpoint = useMemo(
     () => 'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/',
     []
   );
 
-  // Phantom wallet setup with event listeners
   const wallets = useMemo(() => {
     const phantom = new PhantomWalletAdapter();
     phantom.on('connect', () => console.log('Phantom connected:', phantom.publicKey?.toBase58()));
@@ -33,18 +31,24 @@ export default function App({ Component, pageProps }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
-      {/* Google Tag (for both Analytics and Ads) */}
-      <Script src="https://www.googletagmanager.com/gtag/js?id=AW-16974377388" strategy="afterInteractive" />
+      {/* Google Tag for Ads and Analytics */}
       <Script
-        id="google-tag"
+        src="https://www.googletagmanager.com/gtag/js?id=AW-16974377388"
+        strategy="afterInteractive"
+        onLoad={() => console.log('Google tag script loaded successfully')}
+        onError={(e) => console.error('Error loading Google tag script:', e)}
+      />
+      <Script
+        id="google-tag-config"
         strategy="afterInteractive"
         dangerouslySetInnerHTML={{
           __html: `
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'AW-16974377388'); // Google Ads
-            gtag('config', 'G-LQKVMRNG0J');  // Google Analytics
+            gtag('config', 'AW-16974377388', { 'debug_mode': true });
+            gtag('config', 'G-LQKVMRNG0J', { 'debug_mode': true });
+            console.log('Google tag initialized for Ads (AW-16974377388) and Analytics (G-LQKVMRNG0J)');
           `,
         }}
       />
@@ -62,7 +66,6 @@ export default function App({ Component, pageProps }) {
         }}
       />
 
-      {/* Solana Wallet Integration */}
       <ConnectionProvider endpoint={endpoint}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
