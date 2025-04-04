@@ -9,14 +9,17 @@ import '../styles/globals.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 
 export default function App({ Component, pageProps }) {
+  // Solana network and endpoint setup
   const network = WalletAdapterNetwork.Mainnet;
-  const endpoint = useMemo(() => 'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/', []);
+  const endpoint = useMemo(
+    () => 'https://billowing-greatest-sheet.solana-mainnet.quiknode.pro/d5106d1eeedbf27adac9b05e8361605dd9b57255/',
+    []
+  );
 
+  // Phantom wallet setup with event listeners
   const wallets = useMemo(() => {
     const phantom = new PhantomWalletAdapter();
-    phantom.on('connect', () => {
-      console.log('Phantom connected:', phantom.publicKey?.toBase58());
-    });
+    phantom.on('connect', () => console.log('Phantom connected:', phantom.publicKey?.toBase58()));
     phantom.on('disconnect', () => console.log('Phantom disconnected'));
     phantom.on('error', (error) => console.error('Phantom error:', error));
     return [phantom];
@@ -29,48 +32,23 @@ export default function App({ Component, pageProps }) {
         <meta name="description" content="Launch Solana meme coins for just 0.05 SOL!" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      {/* Google Analytics */}
-      <Script src="https://www.googletagmanager.com/gtag/js?id=G-LQKVMRNG0J" strategy="afterInteractive" />
-      <Script
-        id="google-analytics"
-        strategy="afterInteractive"
-        dangerouslySetInnerHTML={{
-          __html: `
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-LQKVMRNG0J');
-          `,
-        }}
-      />
-      {/* Google Ads Tag */}
+
+      {/* Google Tag (for both Analytics and Ads) */}
       <Script src="https://www.googletagmanager.com/gtag/js?id=AW-16974377388" strategy="afterInteractive" />
       <Script
-        id="google-ads"
+        id="google-tag"
         strategy="afterInteractive"
         dangerouslySetInnerHTML={{
           __html: `
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'AW-16974377388');
-            function gtag_report_conversion(url) {
-              var callback = function () {
-                if (typeof(url) != 'undefined') {
-                  window.location = url;
-                }
-              };
-              gtag('event', 'conversion', {
-                'send_to': 'AW-16974377388/7i_qCP-BwLMaEKzjgZ4_',
-                'value': 1.0,
-                'currency': 'USD',
-                'event_callback': callback
-              });
-              return false;
-            }
+            gtag('config', 'AW-16974377388'); // Google Ads
+            gtag('config', 'G-LQKVMRNG0J');  // Google Analytics
           `,
         }}
       />
+
       {/* Twitter Pixel */}
       <Script
         id="twitter-pixel"
@@ -83,6 +61,8 @@ export default function App({ Component, pageProps }) {
           `,
         }}
       />
+
+      {/* Solana Wallet Integration */}
       <ConnectionProvider endpoint={endpoint}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
