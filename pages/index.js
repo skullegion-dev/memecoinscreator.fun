@@ -46,9 +46,14 @@ export default function Home() {
     if (connected && publicKey && wallet?.adapter && signAndSendTransaction) {
       setWalletReady(true);
       console.log('Wallet ready:', publicKey.toBase58());
+      console.log('signAndSendTransaction available:', !!signAndSendTransaction);
     } else {
       setWalletReady(false);
       console.log('Wallet not ready');
+      console.log('Connected:', connected);
+      console.log('PublicKey:', publicKey?.toBase58() || 'null');
+      console.log('Wallet adapter:', !!wallet?.adapter);
+      console.log('signAndSendTransaction:', !!signAndSendTransaction);
     }
   }, [connected, publicKey, wallet, signAndSendTransaction]);
 
@@ -153,7 +158,7 @@ export default function Home() {
         }
 
         const { signature } = await signAndSendTransaction(transaction, {
-          signers: [mintKeypair], // Local signer for mint creation
+          signers: [mintKeypair],
           skipPreflight: false,
         });
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
