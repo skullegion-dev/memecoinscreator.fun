@@ -86,6 +86,17 @@ export default function Home() {
     document.getElementById('token-image').value = '';
   };
 
+  const fetchSolPrice = async () => {
+    try {
+      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+      const data = await response.json();
+      return data.solana.usd;
+    } catch (error) {
+      console.error('Failed to fetch SOL price:', error);
+      return null; // Fallback to SOL if USD conversion fails
+    }
+  };
+
   const createToken = async () => {
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
@@ -161,16 +172,30 @@ export default function Home() {
         setMintAddress(mintAddr);
         setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
 
-        // Track token creation with Twitter custom event
+        // Fetch SOL price for USD conversion
+        const solPrice = await fetchSolPrice();
+        const value = solPrice ? 0.05 * solPrice : 0.05; // Fallback to SOL if fetch fails
+        const currency = solPrice ? 'USD' : 'SOL';
+
+        // Track with Twitter Pixel
         if (typeof window !== 'undefined' && window.twq) {
           window.twq('event', 'tw-pfa12-pfa13', {
-            conversion_id: signature
+            conversion_id: signature,
+            value: value,
+            currency: currency,
           });
+          console.log('Twitter conversion tracked:', signature);
         }
 
-        // Track token creation with Google Ads conversion
-        if (typeof window !== 'undefined' && window.gtag_report_conversion) {
-          window.gtag_report_conversion(); // No URL redirect needed
+        // Track "memecoinscreator-purchase" with Google Ads
+        if (typeof window !== 'undefined' && window.gtag) {
+          window.gtag('event', 'conversion', {
+            send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
+            transaction_id: signature,
+            value: value,
+            currency: currency,
+          });
+          console.log('Google Ads conversion tracked:', signature, value, currency);
         }
 
         return;
