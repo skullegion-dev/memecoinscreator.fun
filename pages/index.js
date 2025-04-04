@@ -90,10 +90,11 @@ export default function Home() {
     try {
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
       const data = await response.json();
+      console.log('SOL/USD price fetched:', data.solana.usd);
       return data.solana.usd;
     } catch (error) {
       console.error('Failed to fetch SOL price:', error);
-      return null; // Fallback to SOL if USD conversion fails
+      return null; // Fallback to SOL if fetch fails
     }
   };
 
@@ -172,22 +173,11 @@ export default function Home() {
         setMintAddress(mintAddr);
         setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
 
-        // Fetch SOL price for USD conversion
+        // Track Google Ads conversion only on success
         const solPrice = await fetchSolPrice();
-        const value = solPrice ? 0.05 * solPrice : 0.05; // Fallback to SOL if fetch fails
+        const value = solPrice ? 0.05 * solPrice : 0.05; // Convert 0.05 SOL to USD if possible
         const currency = solPrice ? 'USD' : 'SOL';
 
-        // Track with Twitter Pixel
-        if (typeof window !== 'undefined' && window.twq) {
-          window.twq('event', 'tw-pfa12-pfa13', {
-            conversion_id: signature,
-            value: value,
-            currency: currency,
-          });
-          console.log('Twitter conversion tracked:', signature);
-        }
-
-        // Track "memecoinscreator-purchase" with Google Ads
         if (typeof window !== 'undefined' && window.gtag) {
           window.gtag('event', 'conversion', {
             send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
@@ -195,7 +185,15 @@ export default function Home() {
             value: value,
             currency: currency,
           });
-          console.log('Google Ads conversion tracked:', signature, value, currency);
+          console.log('Google Ads conversion tracked:', {
+            send_to: 'AW-16974377388/VNtICOap_7MaEKzjgZ4_',
+            transaction_id: signature,
+            value: value,
+            currency: currency,
+          });
+        } else {
+          console.error('Google gtag not available - conversion tracking failed');
+          setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`);
         }
 
         return;
@@ -204,7 +202,7 @@ export default function Home() {
         if (error instanceof SendTransactionError) {
           const logs = await error.getLogs(connection);
           console.error('Transaction simulation failed. Logs:', logs);
-          setStatus(`Error: Transaction simulation failed - ${error.message}. Logs: ${logs.join(', ')}`);
+          setStatus(`Error: Transaction failed - ${error.message}. Logs: ${logs.join(', ')}`);
         } else {
           console.error('Token creation error:', error);
           setStatus(`Error: ${error.message}`);
