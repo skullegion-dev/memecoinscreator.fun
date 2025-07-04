@@ -3,7 +3,7 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import { Metaplex } from '@metaplex-foundation/js';
+import { Metaplex, walletAdapterIdentity } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
 
 const WalletMultiButtonDynamic = dynamic(
@@ -103,7 +103,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running createToken with Metaplex SDK v2');
+    console.log('Running createToken with Metaplex SDK v3');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -151,13 +151,26 @@ export default function Home() {
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         const blockhashTimestamp = Date.now();
 
-        const transaction = new Transaction({
+        // Separate fee transfer transaction
+        const feeTransaction = new Transaction({
+          recentBlockhash: blockhash,
+          feePayer: publicKey,
+        });
+        feeTransaction.add(
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
+        );
+
+        const { signature: feeSignature } = await signAndSend(feeTransaction, { signers: [] });
+        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
+        console.log('Fee transferred:', feeSignature);
+
+        // Token creation transaction
+        const tokenTransaction = new Transaction({
           recentBlockhash: blockhash,
           feePayer: publicKey,
         });
 
-        transaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT }),
+        tokenTransaction.add(
           SystemProgram.createAccount({
             fromPubkey: publicKey,
             newAccountPubkey: mintKeypair.publicKey,
@@ -177,7 +190,7 @@ export default function Home() {
         );
 
         if (revokeMint) {
-          transaction.add(
+          tokenTransaction.add(
             SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
             createSetAuthorityInstruction(
               mintKeypair.publicKey,
@@ -194,11 +207,12 @@ export default function Home() {
           throw new Error('Blockhash expired before transaction submission');
         }
 
-        const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
+        const { signature } = await signAndSend(tokenTransaction, { signers: [mintKeypair] });
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
 
         // Add metadata using Metaplex SDK
         const metaplex = new Metaplex(connection);
+        metaplex.use(walletAdapterIdentity(wallet));
         const { nft } = await metaplex.nfts().create({
           uri: '', // Add IPFS later if needed
           name: tokenName,
