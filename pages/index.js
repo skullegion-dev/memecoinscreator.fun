@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType } from '@solana/spl-token';
-import { createMetadata, updateMetadata } from '@metaplex-foundation/mpl-token-metadata';
+import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction } from '@solana/spl-token';
+import { createMetadata } from '@metaplex-foundation/mpl-token-metadata';
 import styles from '../styles/Home.module.css';
 
 const WalletMultiButtonDynamic = dynamic(
@@ -87,27 +87,6 @@ export default function Home() {
     document.getElementById('token-image').value = '';
   };
 
-  // Placeholder for image upload to IPFS (e.g., using Pinata)
-  const uploadImageToIPFS = async (imageData) => {
-    try {
-      // Example using Pinata API (replace with your API key and setup)
-      const formData = new FormData();
-      formData.append('file', imageData);
-      const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer YOUR_PINATA_JWT`,
-        },
-        body: formData,
-      });
-      const data = await response.json();
-      return `https://ipfs.io/ipfs/${data.IpfsHash}`;
-    } catch (error) {
-      console.error('Failed to upload image to IPFS:', error);
-      return '';
-    }
-  };
-
   const fetchSolPrice = async () => {
     try {
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
@@ -121,7 +100,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running updated createToken with tokenCreated flag - v3');
+    console.log('Running updated createToken with tokenCreated flag - v4');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -156,6 +135,17 @@ export default function Home() {
         const mintKeypair = Keypair.generate();
         const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
         const lamports = await connection.getMinimumBalanceForRentExemption(82);
+        const totalSupply = BigInt(Math.round(parseFloat(supply) * Math.pow(10, decimals)));
+
+        // Create Associated Token Account (ATA)
+        const associatedToken = new PublicKey(
+          (await import('@solana/spl-token')).getAssociatedTokenAddressSync(
+            mintKeypair.publicKey,
+            publicKey,
+            false,
+            tokenProgramId
+          )
+        );
 
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         const blockhashTimestamp = Date.now();
@@ -174,16 +164,19 @@ export default function Home() {
             lamports,
             programId: tokenProgramId,
           }),
-          createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
+          createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId),
+          createAssociatedTokenAccountInstruction(
+            publicKey,
+            associatedToken,
+            publicKey,
+            mintKeypair.publicKey,
+            tokenProgramId
+          ),
+          createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId)
         );
 
         // Add metadata
-        let imageUri = '';
-        if (imagePreview) {
-          const file = document.getElementById('token-image').files[0];
-          imageUri = await uploadImageToIPFS(file);
-        }
-
+        const imageUri = ''; // Add IPFS later if needed
         const metadataPDA = await createMetadata({
           connection,
           payer: publicKey,
@@ -219,7 +212,7 @@ export default function Home() {
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
         setStatus(
-          `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium (search by mint address if not visible in dropdown).`
+          `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium (search by name or mint address).`
         );
         console.log(`Token "${tokenName}" created! Mint: ${mintAddr}`);
         tokenCreated = true;
@@ -505,7 +498,7 @@ export default function Home() {
                 <li><strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.</li>
                 <li><strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").</li>
                 <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL, includes freeze revocation). Optionally revoke mint for an extra 0.025 SOL.</li>
-                <li><strong>Add Liquidity:</strong> Click "Add Liquidity" to visit Raydium. Search for your token by mint address (copy from status message) and create a liquidity pool with SOL or USDC.</li>
+                <li><strong>Add Liquidity:</strong> Click "Add Liquidity" to visit Raydium. Search for your token by name, symbol, or mint address (copy from status message) and create a liquidity pool with SOL or USDC.</li>
                 <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," enter a mint address, and revoke for 0.025 SOL.</li>
               </ol>
               <p className={styles.guideText}>
@@ -529,7 +522,7 @@ export default function Home() {
                 </div>
                 <div className={styles.faqItem}>
                   <h3>Why don’t I see my token on Raydium?</h3>
-                  <p>Copy the mint address from the status message and paste it into Raydium’s search bar. Ensure you’ve created a liquidity pool.</p>
+                  <p>Search for your token by name, symbol, or mint address on Raydium. Ensure you’ve created a liquidity pool. Copy the mint address from the status message if needed.</p>
                 </div>
                 <div className={styles.faqItem}>
                   <h3>What if I encounter an error?</h3>
