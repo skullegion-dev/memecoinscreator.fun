@@ -77,14 +77,30 @@ export default function Home() {
   };
 
   const ensureWalletConnected = async () => {
-    if (!wallet?.adapter?.connected) {
+    if (!wallet?.adapter || !publicKey || !wallet?.adapter?.connected) {
       try {
-        await wallet?.adapter?.connect();
+        if (!wallet?.adapter) {
+          throw new Error('Wallet adapter not available. Please reconnect wallet.');
+        }
+        await wallet.adapter.connect();
+        let attempts = 0;
+        const maxAttempts = 10;
+        const delayMs = 1000;
+        while (!wallet?.adapter?.publicKey && attempts < maxAttempts) {
+          console.log(`Waiting for wallet publicKey (attempt ${attempts + 1}/${maxAttempts})...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          attempts++;
+        }
+        if (!wallet?.adapter?.publicKey) {
+          throw new Error('Wallet public key not available after connection attempts');
+        }
         console.log('Wallet connected:', wallet?.adapter?.publicKey?.toBase58());
       } catch (error) {
         console.error('Failed to connect wallet:', error);
         throw new Error('Wallet not connected. Please reconnect and try again.');
       }
+    } else {
+      console.log('Wallet already connected:', wallet?.adapter?.publicKey?.toBase58());
     }
   };
 
@@ -115,7 +131,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running createToken with Metaplex SDK v4');
+    console.log('Running createToken with Metaplex SDK v6');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -137,7 +153,7 @@ export default function Home() {
       try {
         setStatus('Checking SOL balance...');
         console.log('Checking SOL balance...');
-        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0);
+        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.005 * LAMPORTS_PER_SOL); // Buffer for rent/network fees
         const balanceInLamports = await connection.getBalance(publicKey);
         if (balanceInLamports < totalRequiredLamports) {
           throw new Error(
@@ -148,6 +164,9 @@ export default function Home() {
         setStatus('Ensuring wallet connection...');
         console.log('Ensuring wallet connection...');
         await ensureWalletConnected();
+
+        // Add delay to ensure wallet is fully initialized
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         setStatus('Creating token...');
         console.log('Creating token...');
@@ -167,20 +186,7 @@ export default function Home() {
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         const blockhashTimestamp = Date.now();
 
-        // Separate fee transfer transaction
-        const feeTransaction = new Transaction({
-          recentBlockhash: blockhash,
-          feePayer: publicKey,
-        });
-        feeTransaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
-        );
-
-        const { signature: feeSignature } = await signAndSend(feeTransaction, { signers: [] });
-        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
-        console.log('Fee transferred:', feeSignature);
-
-        // Token creation transaction
+        // Simulate token creation transaction
         const tokenTransaction = new Transaction({
           recentBlockhash: blockhash,
           feePayer: publicKey,
@@ -207,7 +213,6 @@ export default function Home() {
 
         if (revokeMint) {
           tokenTransaction.add(
-            SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
             createSetAuthorityInstruction(
               mintKeypair.publicKey,
               publicKey,
@@ -219,6 +224,32 @@ export default function Home() {
           );
         }
 
+        // Simulate transaction
+        const simulation = await connection.simulateTransaction(tokenTransaction, [mintKeypair]);
+        if (simulation.value.err) {
+          throw new Error('Token creation simulation failed: ' + JSON.stringify(simulation.value.logs));
+        }
+
+        // Send fee transfer transaction
+        const feeTransaction = new Transaction({
+          recentBlockhash: blockhash,
+          feePayer: publicKey,
+        });
+        feeTransaction.add(
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
+        );
+
+        if (revokeMint) {
+          feeTransaction.add(
+            SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE })
+          );
+        }
+
+        const { signature: feeSignature } = await signAndSend(feeTransaction, { signers: [] });
+        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
+        console.log('Fee transferred:', feeSignature);
+
+        // Send token creation transaction
         if (Date.now() - blockhashTimestamp > BLOCKHASH_EXPIRY_MS) {
           throw new Error('Blockhash expired before transaction submission');
         }
@@ -227,8 +258,11 @@ export default function Home() {
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
 
         // Add metadata using Metaplex SDK
+        setStatus('Adding token metadata...');
+        console.log('Adding token metadata...');
         const metaplex = new Metaplex(connection);
         metaplex.use(walletAdapterIdentity(wallet));
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // Additional delay for Metaplex
         const { nft } = await metaplex.nfts().create({
           uri: '', // Add IPFS later if needed
           name: tokenName,
@@ -249,7 +283,7 @@ export default function Home() {
 
         if (tokenCreated) {
           const solPrice = await fetchSolPrice();
-          const value = solPrice ? 0.05 * solPrice : 0.05;
+          const value = solPrice ? (0.05 + (revokeMint ? 0.025 : 0)) * solPrice : 0.05 + (revokeMint ? 0.025 : 0);
           const currency = solPrice ? 'USD' : 'SOL';
 
           if (typeof window !== 'undefined' && window.gtag) {
@@ -316,6 +350,10 @@ export default function Home() {
         );
       }
 
+      setStatus('Ensuring wallet connection...');
+      console.log('Ensuring wallet connection...');
+      await ensureWalletConnected();
+
       setStatus('Transferring tokens...');
       console.log('Transferring tokens...');
       const mintPublicKey = new PublicKey(mintAddress);
@@ -380,6 +418,19 @@ export default function Home() {
     const signAndSend = await getSignAndSendTransaction();
 
     try {
+      setStatus('Checking SOL balance for revocation...');
+      console.log('Checking SOL balance for revocation...');
+      const balanceInLamports = await connection.getBalance(publicKey);
+      if (balanceInLamports < REVOKE_MINT_FEE) {
+        throw new Error(
+          `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
+        );
+      }
+
+      setStatus('Ensuring wallet connection...');
+      console.log('Ensuring wallet connection...');
+      await ensureWalletConnected();
+
       setStatus('Revoking mint authority...');
       console.log('Revoking mint authority...');
       const mintPublicKey = new PublicKey(mintAddress);
@@ -434,6 +485,19 @@ export default function Home() {
     const signAndSend = await getSignAndSendTransaction();
 
     try {
+      setStatus('Checking SOL balance for revocation...');
+      console.log('Checking SOL balance for revocation...');
+      const balanceInLamports = await connection.getBalance(publicKey);
+      if (balanceInLamports < REVOKE_MINT_FEE) {
+        throw new Error(
+          `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
+        );
+      }
+
+      setStatus('Ensuring wallet connection...');
+      console.log('Ensuring wallet connection...');
+      await ensureWalletConnected();
+
       setStatus('Revoking mint authority for selected token...');
       console.log('Revoking mint authority for selected token...');
       const mintPublicKey = new PublicKey(selectedMintAddress);
