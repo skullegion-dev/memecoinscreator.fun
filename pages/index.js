@@ -3,6 +3,7 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType } from '@solana/spl-token';
+import { createMetadata, updateMetadata } from '@metaplex-foundation/mpl-token-metadata';
 import styles from '../styles/Home.module.css';
 
 const WalletMultiButtonDynamic = dynamic(
@@ -86,6 +87,27 @@ export default function Home() {
     document.getElementById('token-image').value = '';
   };
 
+  // Placeholder for image upload to IPFS (e.g., using Pinata)
+  const uploadImageToIPFS = async (imageData) => {
+    try {
+      // Example using Pinata API (replace with your API key and setup)
+      const formData = new FormData();
+      formData.append('file', imageData);
+      const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer YOUR_PINATA_JWT`,
+        },
+        body: formData,
+      });
+      const data = await response.json();
+      return `https://ipfs.io/ipfs/${data.IpfsHash}`;
+    } catch (error) {
+      console.error('Failed to upload image to IPFS:', error);
+      return '';
+    }
+  };
+
   const fetchSolPrice = async () => {
     try {
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
@@ -94,7 +116,7 @@ export default function Home() {
       return data.solana.usd;
     } catch (error) {
       console.error('Failed to fetch SOL price:', error);
-      return null; // Fallback to SOL if fetch fails
+      return null;
     }
   };
 
@@ -155,6 +177,25 @@ export default function Home() {
           createInitializeMintInstruction(mintKeypair.publicKey, decimals, publicKey, null, tokenProgramId)
         );
 
+        // Add metadata
+        let imageUri = '';
+        if (imagePreview) {
+          const file = document.getElementById('token-image').files[0];
+          imageUri = await uploadImageToIPFS(file);
+        }
+
+        const metadataPDA = await createMetadata({
+          connection,
+          payer: publicKey,
+          mint: mintKeypair.publicKey,
+          mintAuthority: publicKey,
+          updateAuthority: publicKey,
+          name: tokenName,
+          symbol: tokenSymbol,
+          uri: imageUri,
+          sellerFeeBasisPoints: 0,
+        });
+
         if (revokeMint) {
           transaction.add(
             SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
@@ -177,7 +218,9 @@ export default function Home() {
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
-        setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium to trade!`);
+        setStatus(
+          `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium (search by mint address if not visible in dropdown).`
+        );
         console.log(`Token "${tokenName}" created! Mint: ${mintAddr}`);
         tokenCreated = true;
 
@@ -201,7 +244,9 @@ export default function Home() {
             });
           } else {
             console.error('Google gtag not available - conversion tracking failed');
-            setStatus(`Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`);
+            setStatus(
+              `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Tracking failed - check console`
+            );
           }
         }
 
@@ -356,7 +401,7 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
           <section className={styles.toolsSection}>
-            <h1 className={styles.title}>Create Your MemeCoin Today for Just 0.05 SOL !</h1>
+            <h1 className={styles.title}>Create Your MemeCoin Today for Just 0.05 SOL!</h1>
             <p className={styles.subtitle}>
               The CHEAPEST & EASIEST way to blast your memecoin to Raydium & Dexscreener instantly!
             </p>
@@ -390,7 +435,7 @@ export default function Home() {
                 className={styles.input}
               />
               <div className={styles.imageUpload}>
-                <label htmlFor="token-image">Upload Meme Image</label>
+                <label htmlFor="token-image">Upload Meme Image (optional)</label>
                 <input type="file" id="token-image" accept="image/*" onChange={handleImageChange} />
                 {imagePreview && (
                   <div className={styles.imagePreviewContainer}>
@@ -456,15 +501,15 @@ export default function Home() {
                 Launch your Solana memecoin in minutes with the cheapest tool around! Here’s how:
               </p>
               <ol className={styles.guideList}>
-                <li><strong>Connect Wallet:</strong> Click "Connect Wallet" and link your Solana wallet (e.g., Phantom).</li>
+                <li><strong>Connect Wallet:</strong> Click "Connect Wallet" and link your Solana wallet (e.g., Phantom) on Mainnet.</li>
                 <li><strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.</li>
                 <li><strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").</li>
-                <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL). Optionally revoke mint for an extra 0.025 SOL.</li>
-                <li><strong>Add Liquidity:</strong> Use "Add Liquidity" to head to Raydium and make your token tradable.</li>
-                <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," choose a token, and revoke its mint authority for 0.025 SOL.</li>
+                <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL, includes freeze revocation). Optionally revoke mint for an extra 0.025 SOL.</li>
+                <li><strong>Add Liquidity:</strong> Click "Add Liquidity" to visit Raydium. Search for your token by mint address (copy from status message) and create a liquidity pool with SOL or USDC.</li>
+                <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," enter a mint address, and revoke for 0.025 SOL.</li>
               </ol>
               <p className={styles.guideText}>
-                Your token will be live on Raydium and visible on Dexscreener instantly after adding liquidity!
+                Your token will be live on Raydium and Dexscreener after adding liquidity! If it doesn’t appear in Raydium’s dropdown, paste the mint address in the search bar.
               </p>
             </section>
             <section className={styles.faq}>
@@ -480,15 +525,15 @@ export default function Home() {
                 </div>
                 <div className={styles.faqItem}>
                   <h3>How do I revoke mint for an existing token?</h3>
-                  <p>Click "Select Token to Revoke," choose your token, and confirm for 0.025 SOL.</p>
+                  <p>Click "Select Token to Revoke," enter your token’s mint address, and confirm for 0.025 SOL.</p>
                 </div>
                 <div className={styles.faqItem}>
-                  <h3>Will my token be on Dexscreener instantly?</h3>
-                  <p>Yes, once you add liquidity on Raydium, it’ll appear on Dexscreener automatically.</p>
+                  <h3>Why don’t I see my token on Raydium?</h3>
+                  <p>Copy the mint address from the status message and paste it into Raydium’s search bar. Ensure you’ve created a liquidity pool.</p>
                 </div>
                 <div className={styles.faqItem}>
                   <h3>What if I encounter an error?</h3>
-                  <p>Ensure your wallet has enough SOL, is on Mainnet, and you’re the token’s authority. Contact support if issues persist.</p>
+                  <p>Ensure your wallet has enough SOL (~0.1 SOL for creation + pool), is on Mainnet, and you’re the token’s authority. Contact <a href="mailto:memecoinscreator2025@gmail.com">support</a> if issues persist.</p>
                 </div>
               </div>
             </section>
