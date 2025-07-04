@@ -103,7 +103,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running updated createToken with Metaplex SDK - v5');
+    console.log('Running createToken with Metaplex SDK');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
