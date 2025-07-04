@@ -103,7 +103,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running createToken with Metaplex SDK');
+    console.log('Running createToken with Metaplex SDK v2');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -199,18 +199,15 @@ export default function Home() {
 
         // Add metadata using Metaplex SDK
         const metaplex = new Metaplex(connection);
-        await metaplex
-          .tokens()
-          .createTokenWithMetadata({
-            mint: mintKeypair.publicKey,
-            authority: publicKey,
-            name: tokenName,
-            symbol: tokenSymbol,
-            uri: '', // Add IPFS later if needed
-            sellerFeeBasisPoints: 0,
-            decimals,
-          })
-          .run();
+        const { nft } = await metaplex.nfts().create({
+          uri: '', // Add IPFS later if needed
+          name: tokenName,
+          symbol: tokenSymbol,
+          sellerFeeBasisPoints: 0,
+          tokenOwner: publicKey,
+          tokenMint: mintKeypair.publicKey,
+          isMutable: true,
+        }).run();
 
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
