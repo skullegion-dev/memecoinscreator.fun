@@ -76,6 +76,18 @@ export default function Home() {
     throw new Error('No transaction signing method available');
   };
 
+  const ensureWalletConnected = async () => {
+    if (!wallet?.adapter?.connected) {
+      try {
+        await wallet?.adapter?.connect();
+        console.log('Wallet connected:', wallet?.adapter?.publicKey?.toBase58());
+      } catch (error) {
+        console.error('Failed to connect wallet:', error);
+        throw new Error('Wallet not connected. Please reconnect and try again.');
+      }
+    }
+  };
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -103,7 +115,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running createToken with Metaplex SDK v3');
+    console.log('Running createToken with Metaplex SDK v4');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -132,6 +144,10 @@ export default function Home() {
             `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
           );
         }
+
+        setStatus('Ensuring wallet connection...');
+        console.log('Ensuring wallet connection...');
+        await ensureWalletConnected();
 
         setStatus('Creating token...');
         console.log('Creating token...');
@@ -221,7 +237,7 @@ export default function Home() {
           tokenOwner: publicKey,
           tokenMint: mintKeypair.publicKey,
           isMutable: true,
-        }).run();
+        });
 
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
@@ -274,7 +290,7 @@ export default function Home() {
           console.log(`Failed after ${maxAttempts} attempts`);
           return;
         }
-        setStatus(`Retrying (${attempts}/${maxAttempts}) due to blockhash issue...`);
+        setStatus(`Retrying (${attempts}/${maxAttempts})...`);
         console.log(`Retrying (${attempts}/${maxAttempts})`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
