@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction } from '@solana/spl-token';
-import { createMetadata } from '@metaplex-foundation/mpl-token-metadata';
+import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { Metaplex } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
 
 const WalletMultiButtonDynamic = dynamic(
@@ -13,6 +13,7 @@ const WalletMultiButtonDynamic = dynamic(
 
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
+const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 const BLOCKHASH_EXPIRY_MS = 60000;
 
@@ -30,6 +31,8 @@ export default function Home() {
   const [revokeMint, setRevokeMint] = useState(false);
   const [revokeFreeze] = useState(true);
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
+  const [transferAmount, setTransferAmount] = useState('');
   const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
@@ -100,7 +103,7 @@ export default function Home() {
   };
 
   const createToken = async () => {
-    console.log('Running updated createToken with tokenCreated flag - v4');
+    console.log('Running updated createToken with Metaplex SDK - v5');
     if (!walletReady || !connected || !publicKey || !tokenProgramId) {
       setStatus('Please connect your wallet to Mainnet!');
       console.log('Wallet not ready or not connected');
@@ -138,13 +141,11 @@ export default function Home() {
         const totalSupply = BigInt(Math.round(parseFloat(supply) * Math.pow(10, decimals)));
 
         // Create Associated Token Account (ATA)
-        const associatedToken = new PublicKey(
-          (await import('@solana/spl-token')).getAssociatedTokenAddressSync(
-            mintKeypair.publicKey,
-            publicKey,
-            false,
-            tokenProgramId
-          )
+        const associatedToken = getAssociatedTokenAddressSync(
+          mintKeypair.publicKey,
+          publicKey,
+          false,
+          tokenProgramId
         );
 
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -175,20 +176,6 @@ export default function Home() {
           createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId)
         );
 
-        // Add metadata
-        const imageUri = ''; // Add IPFS later if needed
-        const metadataPDA = await createMetadata({
-          connection,
-          payer: publicKey,
-          mint: mintKeypair.publicKey,
-          mintAuthority: publicKey,
-          updateAuthority: publicKey,
-          name: tokenName,
-          symbol: tokenSymbol,
-          uri: imageUri,
-          sellerFeeBasisPoints: 0,
-        });
-
         if (revokeMint) {
           transaction.add(
             SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE }),
@@ -209,10 +196,26 @@ export default function Home() {
 
         const { signature } = await signAndSend(transaction, { signers: [mintKeypair] });
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+
+        // Add metadata using Metaplex SDK
+        const metaplex = new Metaplex(connection);
+        await metaplex
+          .tokens()
+          .createTokenWithMetadata({
+            mint: mintKeypair.publicKey,
+            authority: publicKey,
+            name: tokenName,
+            symbol: tokenSymbol,
+            uri: '', // Add IPFS later if needed
+            sellerFeeBasisPoints: 0,
+            decimals,
+          })
+          .run();
+
         const mintAddr = mintKeypair.publicKey.toBase58();
         setMintAddress(mintAddr);
         setStatus(
-          `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium (search by name or mint address).`
+          `Token "${tokenName}" created! Mint: ${mintAddr} 🚀 Add liquidity on Raydium (search by name or mint address) or transfer to another wallet.`
         );
         console.log(`Token "${tokenName}" created! Mint: ${mintAddr}`);
         tokenCreated = true;
@@ -264,6 +267,75 @@ export default function Home() {
         console.log(`Retrying (${attempts}/${maxAttempts})`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
+    }
+  };
+
+  const transferTokens = async () => {
+    if (!walletReady || !connected || !publicKey || !mintAddress || !recipientAddress || !transferAmount || transferAmount <= 0) {
+      setStatus('Please connect wallet, select a token, enter a valid recipient address and amount!');
+      console.log('Invalid transfer conditions');
+      return;
+    }
+
+    const signAndSend = await getSignAndSendTransaction();
+
+    try {
+      setStatus('Checking SOL balance for transfer...');
+      console.log('Checking SOL balance for transfer...');
+      const balanceInLamports = await connection.getBalance(publicKey);
+      if (balanceInLamports < TRANSFER_FEE) {
+        throw new Error(
+          `Insufficient SOL for transfer fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${TRANSFER_FEE / LAMPORTS_PER_SOL} SOL`
+        );
+      }
+
+      setStatus('Transferring tokens...');
+      console.log('Transferring tokens...');
+      const mintPublicKey = new PublicKey(mintAddress);
+      const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
+      const recipientPublicKey = new PublicKey(recipientAddress);
+      const amount = BigInt(Math.round(parseFloat(transferAmount) * Math.pow(10, decimals)));
+
+      // Get sender and recipient ATAs
+      const senderATA = getAssociatedTokenAddressSync(mintPublicKey, publicKey, false, tokenProgramId);
+      const recipientATA = getAssociatedTokenAddressSync(mintPublicKey, recipientPublicKey, false, tokenProgramId);
+
+      // Check if recipient ATA exists
+      const recipientAccount = await connection.getAccountInfo(recipientATA);
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: publicKey,
+      });
+
+      // Create recipient ATA if it doesn't exist
+      if (!recipientAccount) {
+        transaction.add(
+          createAssociatedTokenAccountInstruction(
+            publicKey,
+            recipientATA,
+            recipientPublicKey,
+            mintPublicKey,
+            tokenProgramId
+          )
+        );
+      }
+
+      transaction.add(
+        SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: TRANSFER_FEE }),
+        createTransferInstruction(senderATA, recipientATA, publicKey, amount, [], tokenProgramId)
+      );
+
+      const { signature } = await signAndSend(transaction, { signers: [] });
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      setStatus(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
+      console.log(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
+      setRecipientAddress('');
+      setTransferAmount('');
+    } catch (error) {
+      console.error('Transfer error:', error);
+      setStatus(`Error transferring tokens: ${error.message}`);
     }
   };
 
@@ -486,6 +558,26 @@ export default function Home() {
                 </div>
               )}
             </div>
+            <div className={styles.transferSection}>
+              <h2 className={styles.revokeTitle}>Transfer Tokens</h2>
+              <input
+                type="text"
+                placeholder="Recipient Wallet Address"
+                value={recipientAddress}
+                onChange={(e) => setRecipientAddress(e.target.value)}
+                className={styles.input}
+              />
+              <input
+                type="number"
+                placeholder="Amount to Transfer"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                className={styles.input}
+              />
+              <button onClick={transferTokens} className={styles.createButton}>
+                Transfer Tokens (0.001 SOL)
+              </button>
+            </div>
           </section>
           <aside className={styles.sidebar}>
             <section className={styles.guide}>
@@ -498,6 +590,7 @@ export default function Home() {
                 <li><strong>Fill Details:</strong> Enter your token name, symbol, supply, and decimals.</li>
                 <li><strong>Upload Image:</strong> Add a meme image (optional, detachable with "Remove Image").</li>
                 <li><strong>Launch Token:</strong> Click "Launch Memecoin" (0.05 SOL, includes freeze revocation). Optionally revoke mint for an extra 0.025 SOL.</li>
+                <li><strong>Transfer Tokens:</strong> Enter a recipient wallet address and amount, then click "Transfer Tokens" (0.001 SOL) to send tokens without adding liquidity.</li>
                 <li><strong>Add Liquidity:</strong> Click "Add Liquidity" to visit Raydium. Search for your token by name, symbol, or mint address (copy from status message) and create a liquidity pool with SOL or USDC.</li>
                 <li><strong>Revoke Existing Mint:</strong> Click "Select Token to Revoke," enter a mint address, and revoke for 0.025 SOL.</li>
               </ol>
@@ -513,6 +606,10 @@ export default function Home() {
                   <p>Only 0.05 SOL for creation (includes freeze revocation). Revoking mint adds 0.025 SOL.</p>
                 </div>
                 <div className={styles.faqItem}>
+                  <h3>Can I transfer tokens without adding liquidity?</h3>
+                  <p>Yes, use the "Transfer Tokens" section to send tokens to another wallet for 0.001 SOL.</p>
+                </div>
+                <div className={styles.faqItem}>
                   <h3>Why is revoke freeze included?</h3>
                   <p>It’s automatically revoked during creation to ensure your token can’t be frozen, enhancing trust.</p>
                 </div>
@@ -526,7 +623,7 @@ export default function Home() {
                 </div>
                 <div className={styles.faqItem}>
                   <h3>What if I encounter an error?</h3>
-                  <p>Ensure your wallet has enough SOL (~0.1 SOL for creation + pool), is on Mainnet, and you’re the token’s authority. Contact <a href="mailto:memecoinscreator2025@gmail.com">support</a> if issues persist.</p>
+                  <p>Ensure your wallet has enough SOL (~0.1 SOL for creation + pool or transfers), is on Mainnet, and you’re the token’s authority. Contact <a href="mailto:memecoinscreator2025@gmail.com">support</a> if issues persist.</p>
                 </div>
               </div>
             </section>
