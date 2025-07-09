@@ -202,7 +202,7 @@ export default function Home() {
         const totalSupply = BigInt(Math.round(parseFloat(supply) * Math.pow(10, decimals)));
 
         const associatedToken = getAssociatedTokenAddressSync(
-          mintKeypair,
+          mintKeypair.publicKey,
           publicKey,
           false,
           tokenProgramId
@@ -229,7 +229,7 @@ export default function Home() {
         }
 
         const { signature: feeSignature, lastValidBlockHeight: feeBlockHeight } = await signAndSendTransaction(feeTransaction);
-        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
+        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight: feeBlockHeight }, 'confirmed');
         console.log('Fee transferred:', feeSignature);
 
         // Token creation transaction
@@ -254,13 +254,13 @@ export default function Home() {
             mintKeypair.publicKey,
             tokenProgramId
           ),
-          createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId})
+          createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId)
         );
 
         if (revokeMint) {
           tokenTransaction.add(
             createSetAuthorityInstruction(
-              mintKeypair.publicKeypair,
+              mintKeypair.publicKey,
               publicKey,
               AuthorityType.MintTokens,
               null,
@@ -295,7 +295,6 @@ export default function Home() {
         setStatus('Adding token metadata...');
         console.log('Adding token metadata...');
         const metaplex = new Metaplex(connection);
-        // Use window.solana as the wallet
         metaplex.use({
           signTransaction: async (tx) => {
             const signedTx = await window.solana.signTransaction(tx);
