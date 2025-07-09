@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import { Metaplex } from '@metaplex-foundation/js';
+import { Metaplex, walletAdapterIdentity } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
 
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
@@ -10,6 +10,8 @@ const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
 const BLOCKHASH_EXPIRY_MS = 60000;
+const RPC_RETRIES = 3;
+const RPC_RETRY_DELAY_MS = 2000;
 
 export default function Home() {
   const { connection } = useConnection();
@@ -28,6 +30,9 @@ export default function Home() {
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
+
+  // Fallback RPC connection
+  const fallbackConnection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
 
   useEffect(() => {
     try {
@@ -98,27 +103,53 @@ export default function Home() {
     }
   };
 
+  // Retryable RPC call wrapper
+  const withRpcRetry = async (fn, args = [], maxRetries = RPC_RETRIES) => {
+    let attempts = 0;
+    while (attempts < maxRetries) {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        attempts++;
+        console.error(`RPC call attempt ${attempts}/${maxRetries} failed:`, error);
+        if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
+          if (attempts === maxRetries) {
+            console.warn('Switching to fallback RPC...');
+            return await fn(...args, { connection: fallbackConnection });
+          }
+          await new Promise((resolve) => setTimeout(resolve, RPC_RETRY_DELAY_MS));
+        } else {
+          throw error;
+        }
+      }
+    }
+  };
+
   const signAndSendTransaction = async (transaction, signers = []) => {
     let attempts = 0;
     const maxAttempts = 5;
     while (attempts < maxAttempts) {
       try {
-        // Refresh blockhash for each signing attempt
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        // Refresh blockhash
+        const { blockhash, lastValidBlockHeight } = await withRpcRetry(
+          connection.getLatestBlockhash.bind(connection),
+          ['confirmed']
+        );
         transaction.recentBlockhash = blockhash;
 
         signers.forEach((signer) => transaction.partialSign(signer));
         const signedTx = await window.solana.signTransaction(transaction);
-        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-          skipPreflight: true,
-        });
+        const signature = await withRpcRetry(
+          connection.sendRawTransaction.bind(connection),
+          [signedTx.serialize(), { skipPreflight: true }]
+        );
         console.log('Transaction signed and sent:', signature);
         return { signature, lastValidBlockHeight };
       } catch (error) {
         attempts++;
         console.error(`SignAndSend attempt ${attempts}/${maxAttempts} failed:`, error);
         if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
-          setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+          setStatus('Phantom wallet error: Disconnected. Please disconnect and try again.');
           if (attempts === 1) {
             try {
               await disconnectWallet();
@@ -187,7 +218,7 @@ export default function Home() {
         setStatus('Checking SOL balance...');
         console.log('Checking SOL balance...');
         const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.005 * LAMPORTS_PER_SOL);
-        const balanceInLamports = await connection.getBalance(publicKey);
+        const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
         if (balanceInLamports < totalRequiredLamports) {
           throw new Error(
             `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
@@ -198,7 +229,10 @@ export default function Home() {
         console.log('Creating token...');
         const mintKeypair = Keypair.generate();
         const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
-        const lamports = await connection.getMinimumBalanceForRentExemption(82);
+        const lamports = await withRpcRetry(
+          connection.getMinimumBalanceForRentExemption.bind(connection),
+          [82]
+        );
         const totalSupply = BigInt(Math.round(parseFloat(supply) * Math.pow(10, decimals)));
 
         const associatedToken = getAssociatedTokenAddressSync(
@@ -209,7 +243,10 @@ export default function Home() {
         );
 
         // Refresh blockhash
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        const { blockhash, lastValidBlockHeight } = await withRpcRetry(
+          connection.getLatestBlockhash.bind(connection),
+          ['confirmed']
+        );
         const blockhashTimestamp = Date.now();
 
         // Fee transaction
@@ -229,7 +266,11 @@ export default function Home() {
         }
 
         const { signature: feeSignature, lastValidBlockHeight: feeBlockHeight } = await signAndSendTransaction(feeTransaction);
-        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight: feeBlockHeight }, 'confirmed');
+        await withRpcRetry(
+          connection.confirmTransaction.bind(connection),
+            { signature: feeSignature, blockhash, lastValidBlockHeight: feeBlockHeight },
+          ['confirmed']
+        );
         console.log('Fee transferred:', feeSignature);
 
         // Token creation transaction
@@ -273,7 +314,10 @@ export default function Home() {
         // Simulate transaction
         let simulation;
         try {
-          simulation = await connection.simulateTransaction(tokenTransaction, [mintKeypair]);
+          simulation = await withRpcRetry(
+            connection.simulateTransaction.bind(connection),
+            [tokenTransaction, [mintKeypair]]
+          );
           if (simulation.value.err) {
             throw new Error('Token creation simulation failed: ' + JSON.stringify(simulation.value.logs));
           }
@@ -289,19 +333,29 @@ export default function Home() {
         }
 
         const { signature, lastValidBlockHeight: tokenBlockHeight } = await signAndSendTransaction(tokenTransaction, [mintKeypair]);
-        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight: tokenBlockHeight }, 'confirmed');
+        await withRpcRetry(
+          connection.confirmTransaction.bind(connection),
+            { signature, blockhash, lastValidBlockHeight: tokenBlockHeight },
+          ['confirmed']
+        );
 
         // Add metadata
         setStatus('Adding token metadata...');
         console.log('Adding token metadata...');
         const metaplex = new Metaplex(connection);
-        metaplex.use({
-          signTransaction: async (tx) => {
-            const signedTx = await window.solana.signTransaction(tx);
-            return signedTx;
-          },
+        // Use walletAdapterIdentity with window.solana
+        metaplex.use(walletAdapterIdentity({
           publicKey,
-        });
+          signTransaction: async (tx) => await window.solana.signTransaction(tx),
+          signAllTransactions: async (txs) => {
+            const signedTxs = [];
+            for (const tx of txs) {
+              const signedTx = await window.solana.signTransaction(tx);
+              signedTxs.push(signedTx);
+            }
+            return signedTxs;
+          },
+        }));
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const { nft } = await metaplex.nfts().create({
           uri: '',
@@ -351,7 +405,10 @@ export default function Home() {
       } catch (error) {
         attempts++;
         if (error instanceof SendTransactionError) {
-          const logs = await error.getLogs(connection);
+          const logs = await withRpcRetry(
+            error.getLogs.bind(error),
+            [connection]
+          );
           console.error('Transaction failed. Logs:', logs);
           setStatus(`Error: Transaction failed - ${error.message}. Logs: ${logs.join(', ')}`);
         } else {
@@ -360,9 +417,11 @@ export default function Home() {
         }
 
         if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
-          setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+          setStatus('Phantom wallet error: Disconnected. Please disconnect and try again.');
         } else if (error.message.includes('block height exceeded')) {
           setStatus('Transaction expired due to network delay. Retrying...');
+        } else if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
+          setStatus('RPC server unavailable. Retrying...');
         }
 
         if (attempts === maxAttempts) {
@@ -387,7 +446,7 @@ export default function Home() {
     try {
       setStatus('Checking SOL balance for transfer...');
       console.log('Checking SOL balance for transfer...');
-      const balanceInLamports = await connection.getBalance(publicKey);
+      const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
       if (balanceInLamports < TRANSFER_FEE) {
         throw new Error(
           `Insufficient SOL for transfer fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${TRANSFER_FEE / LAMPORTS_PER_SOL} SOL`
@@ -404,8 +463,14 @@ export default function Home() {
       const senderATA = getAssociatedTokenAddressSync(mintPublicKey, publicKey, false, tokenProgramId);
       const recipientATA = getAssociatedTokenAddressSync(mintPublicKey, recipientPublicKey, false, tokenProgramId);
 
-      const recipientAccount = await connection.getAccountInfo(recipientATA);
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const recipientAccount = await withRpcRetry(
+        connection.getAccountInfo.bind(connection),
+        [recipientATA]
+      );
+      const { blockhash, lastValidBlockHeight } = await withRpcRetry(
+        connection.getLatestBlockhash.bind(connection),
+        ['confirmed']
+      );
 
       const transaction = new Transaction({
         recentBlockhash: blockhash,
@@ -430,7 +495,11 @@ export default function Home() {
       );
 
       const { signature } = await signAndSendTransaction(transaction);
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      await withRpcRetry(
+        connection.confirmTransaction.bind(connection),
+          { signature, blockhash, lastValidBlockHeight },
+        ['confirmed']
+      );
       setStatus(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
       console.log(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
       setRecipientAddress('');
@@ -439,9 +508,11 @@ export default function Home() {
       console.error('Transfer error:', error);
       setStatus(`Error transferring tokens: ${error.message}`);
       if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
-        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and try again.');
       } else if (error.message.includes('block height exceeded')) {
         setStatus('Transaction expired due to network delay. Please try again.');
+      } else if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
+        setStatus('RPC server unavailable. Please try again.');
       }
     }
   };
@@ -460,7 +531,7 @@ export default function Home() {
     try {
       setStatus('Checking SOL balance for revocation...');
       console.log('Checking SOL balance for revocation...');
-      const balanceInLamports = await connection.getBalance(publicKey);
+      const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
       if (balanceInLamports < REVOKE_MINT_FEE) {
         throw new Error(
           `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
@@ -472,7 +543,10 @@ export default function Home() {
       const mintPublicKey = new PublicKey(mintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const { blockhash, lastValidBlockHeight } = await withRpcRetry(
+        connection.getLatestBlockhash.bind(connection),
+        ['confirmed']
+      );
       const transaction = new Transaction({
         recentBlockhash: blockhash,
         feePayer: publicKey,
@@ -491,16 +565,22 @@ export default function Home() {
       );
 
       const { signature } = await signAndSendTransaction(transaction);
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      await withRpcRetry(
+        connection.confirmTransaction.bind(connection),
+          { signature, blockhash, lastValidBlockHeight },
+        ['confirmed']
+      );
       setStatus('Mint authority revoked!');
       console.log('Mint authority revoked!');
     } catch (error) {
       console.error('Revoke mint error:', error);
       setStatus(`Error revoking mint: ${error.message}`);
       if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
-        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and try again.');
       } else if (error.message.includes('block height exceeded')) {
         setStatus('Transaction expired due to network delay. Please try again.');
+      } else if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
+        setStatus('RPC server unavailable. Please try again.');
       }
       setRevokeMint(false);
     }
@@ -526,7 +606,7 @@ export default function Home() {
     try {
       setStatus('Checking SOL balance for revocation...');
       console.log('Checking SOL balance for revocation...');
-      const balanceInLamports = await connection.getBalance(publicKey);
+      const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
       if (balanceInLamports < REVOKE_MINT_FEE) {
         throw new Error(
           `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
@@ -538,7 +618,10 @@ export default function Home() {
       const mintPublicKey = new PublicKey(selectedMintAddress);
       const feeRecipient = new PublicKey(FEE_RECIPIENT_ADDRESS);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const { blockhash, lastValidBlockHeight } = await withRpcRetry(
+        connection.getLatestBlockhash.bind(connection),
+        ['confirmed']
+      );
       const transaction = new Transaction({
         recentBlockhash: blockhash,
         feePayer: publicKey,
@@ -557,7 +640,11 @@ export default function Home() {
       );
 
       const { signature } = await signAndSendTransaction(transaction);
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+      await withRpcRetry(
+        connection.confirmTransaction.bind(connection),
+          { signature, blockhash, lastValidBlockHeight },
+        ['confirmed']
+      );
       setStatus(`Mint authority revoked for ${selectedMintAddress}!`);
       console.log(`Mint authority revoked for ${selectedMintAddress}!`);
       setSelectedMintAddress('');
@@ -565,9 +652,11 @@ export default function Home() {
       console.error('Revoke existing mint error:', error);
       setStatus(`Error: ${error.message}`);
       if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
-        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and try again.');
       } else if (error.message.includes('block height exceeded')) {
         setStatus('Transaction expired due to network delay. Please try again.');
+      } else if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
+        setStatus('RPC server unavailable. Please try again.');
       }
     }
   };
@@ -630,7 +719,7 @@ export default function Home() {
                 type="number"
                 placeholder="Decimals (e.g., 6)"
                 value={decimals}
-                onChange={(e) => setDecimals(e.target.value)}
+                onChange={(e) => setTokenName(e.target.value)}
                 className={styles.input}
               />
               <div className={styles.imageUpload}>
