@@ -1,15 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import dynamic from 'next/dynamic';
+import { useConnection } from '@solana/wallet-adapter-react';
 import { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL, SendTransactionError } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityInstruction, AuthorityType, createAssociatedTokenAccountInstruction, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import { Metaplex, walletAdapterIdentity } from '@metaplex-foundation/js';
+import { Metaplex } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
-
-const WalletMultiButtonDynamic = dynamic(
-  () => import('@solana/wallet-adapter-react-ui').then((mod) => mod.WalletMultiButton),
-  { ssr: false }
-);
 
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
@@ -19,7 +13,8 @@ const BLOCKHASH_EXPIRY_MS = 60000;
 
 export default function Home() {
   const { connection } = useConnection();
-  const { publicKey, signAndSendTransaction, signTransaction, connected, wallet } = useWallet();
+  const [publicKey, setPublicKey] = useState(null);
+  const [connected, setConnected] = useState(false);
   const [tokenName, setTokenName] = useState('');
   const [tokenSymbol, setTokenSymbol] = useState('');
   const [supply, setSupply] = useState('');
@@ -33,7 +28,6 @@ export default function Home() {
   const [selectedMintAddress, setSelectedMintAddress] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
-  const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
     try {
@@ -44,63 +38,103 @@ export default function Home() {
       console.error('Failed to set TOKEN_PROGRAM_ID:', error);
       setStatus(`Error initializing program: ${error.message}`);
     }
+
+    // Auto-connect if wallet is available
+    if (window.solana?.isPhantom) {
+      window.solana.connect({ onlyIfTrusted: true }).catch(() => {});
+    }
+
+    // Handle wallet connection events
+    const handleConnect = () => {
+      setPublicKey(new PublicKey(window.solana.publicKey.toString()));
+      setConnected(true);
+      console.log('Wallet connected:', window.solana.publicKey.toString());
+    };
+
+    const handleDisconnect = () => {
+      setPublicKey(null);
+      setConnected(false);
+      console.log('Wallet disconnected');
+    };
+
+    window.solana?.on('connect', handleConnect);
+    window.solana?.on('disconnect', handleDisconnect);
+
+    return () => {
+      window.solana?.off('connect', handleConnect);
+      window.solana?.off('disconnect', handleDisconnect);
+    };
   }, []);
 
-  useEffect(() => {
-    if (connected && publicKey && wallet?.adapter) {
-      setWalletReady(!!signAndSendTransaction || !!signTransaction);
-    } else {
-      setWalletReady(false);
+  const connectWallet = async () => {
+    if (!window.solana?.isPhantom) {
+      setStatus('Phantom wallet not detected! Please install the Phantom extension.');
+      console.log('Phantom wallet not detected');
+      return;
     }
-  }, [connected, publicKey, wallet, signAndSendTransaction, signTransaction]);
 
-  const getSignAndSendTransaction = async () => {
-    if (signAndSendTransaction) {
-      return async (transaction, options) => {
-        const { signature } = await signAndSendTransaction(transaction, options);
-        return { signature };
-      };
+    try {
+      await window.solana.connect();
+      setPublicKey(new PublicKey(window.solana.publicKey.toString()));
+      setConnected(true);
+      console.log('Wallet connected:', window.solana.publicKey.toString());
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+      setStatus(`Failed to connect wallet: ${error.message}`);
     }
-    if (signTransaction) {
-      return async (transaction, options) => {
-        const signedTx = await signTransaction(transaction);
-        if (options?.signers?.length > 0) {
-          options.signers.forEach((signer) => {
-            signedTx.partialSign(signer);
-          });
-        }
-        const signature = await connection.sendRawTransaction(signedTx.serialize());
-        return { signature };
-      };
-    }
-    throw new Error('No transaction signing method available');
   };
 
-  const ensureWalletConnected = async () => {
-    if (!wallet?.adapter || !publicKey || !wallet?.adapter?.connected) {
+  const disconnectWallet = async () => {
+    if (window.solana?.isPhantom) {
       try {
-        if (!wallet?.adapter) {
-          throw new Error('Wallet adapter not available. Please reconnect wallet.');
-        }
-        await wallet.adapter.connect();
-        let attempts = 0;
-        const maxAttempts = 10;
-        const delayMs = 1000;
-        while (!wallet?.adapter?.publicKey && attempts < maxAttempts) {
-          console.log(`Waiting for wallet publicKey (attempt ${attempts + 1}/${maxAttempts})...`);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          attempts++;
-        }
-        if (!wallet?.adapter?.publicKey) {
-          throw new Error('Wallet public key not available after connection attempts');
-        }
-        console.log('Wallet connected:', wallet?.adapter?.publicKey?.toBase58());
+        await window.solana.disconnect();
+        setPublicKey(null);
+        setConnected(false);
+        console.log('Wallet disconnected');
       } catch (error) {
-        console.error('Failed to connect wallet:', error);
-        throw new Error('Wallet not connected. Please reconnect and try again.');
+        console.error('Failed to disconnect wallet:', error);
+        setStatus(`Failed to disconnect wallet: ${error.message}`);
       }
-    } else {
-      console.log('Wallet already connected:', wallet?.adapter?.publicKey?.toBase58());
+    }
+  };
+
+  const signAndSendTransaction = async (transaction, signers = []) => {
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+      try {
+        // Refresh blockhash for each signing attempt
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        transaction.recentBlockhash = blockhash;
+
+        signers.forEach((signer) => transaction.partialSign(signer));
+        const signedTx = await window.solana.signTransaction(transaction);
+        const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: true,
+        });
+        console.log('Transaction signed and sent:', signature);
+        return { signature, lastValidBlockHeight };
+      } catch (error) {
+        attempts++;
+        console.error(`SignAndSend attempt ${attempts}/${maxAttempts} failed:`, error);
+        if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
+          setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+          if (attempts === 1) {
+            try {
+              await disconnectWallet();
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              await connectWallet();
+            } catch (reconnectError) {
+              console.error('Reconnection failed:', reconnectError);
+              setStatus('Failed to reconnect wallet. Please try manually.');
+            }
+          }
+        }
+        if (attempts === maxAttempts) {
+          throw new Error(`Failed to sign transaction after ${maxAttempts} attempts: ${error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
     }
   };
 
@@ -125,16 +159,16 @@ export default function Home() {
       console.log('SOL/USD price fetched:', data.solana.usd);
       return data.solana.usd;
     } catch (error) {
-      console.error('Failed to fetch SOL price:', error);
+      console.error('Error fetching SOL price:', error);
       return null;
     }
   };
 
   const createToken = async () => {
-    console.log('Running createToken with Metaplex SDK v7');
-    if (!walletReady || !connected || !publicKey || !tokenProgramId) {
-      setStatus('Please connect your wallet to Mainnet!');
-      console.log('Wallet not ready or not connected');
+    console.log('Running createToken with window.solana');
+    if (!connected || !publicKey || !window.solana?.isPhantom || !tokenProgramId) {
+      setStatus('Please connect your Phantom wallet to Mainnet!');
+      console.log('Wallet not connected or not ready');
       return;
     }
 
@@ -144,7 +178,6 @@ export default function Home() {
       return;
     }
 
-    const signAndSend = await getSignAndSendTransaction();
     let attempts = 0;
     const maxAttempts = 3;
     let tokenCreated = false;
@@ -153,20 +186,13 @@ export default function Home() {
       try {
         setStatus('Checking SOL balance...');
         console.log('Checking SOL balance...');
-        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.005 * LAMPORTS_PER_SOL); // Buffer for rent/network fees
+        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.005 * LAMPORTS_PER_SOL);
         const balanceInLamports = await connection.getBalance(publicKey);
         if (balanceInLamports < totalRequiredLamports) {
           throw new Error(
             `Insufficient SOL: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${(totalRequiredLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
           );
         }
-
-        setStatus('Ensuring wallet connection...');
-        console.log('Ensuring wallet connection...');
-        await ensureWalletConnected();
-
-        // Add delay to ensure wallet is fully initialized
-        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         setStatus('Creating token...');
         console.log('Creating token...');
@@ -175,18 +201,38 @@ export default function Home() {
         const lamports = await connection.getMinimumBalanceForRentExemption(82);
         const totalSupply = BigInt(Math.round(parseFloat(supply) * Math.pow(10, decimals)));
 
-        // Create Associated Token Account (ATA)
         const associatedToken = getAssociatedTokenAddressSync(
-          mintKeypair.publicKey,
+          mintKeypair,
           publicKey,
           false,
           tokenProgramId
         );
 
+        // Refresh blockhash
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         const blockhashTimestamp = Date.now();
 
-        // Create token transaction
+        // Fee transaction
+        const feeTransaction = new Transaction({
+          recentBlockhash: blockhash,
+          feePayer: publicKey,
+        });
+
+        feeTransaction.add(
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
+        );
+
+        if (revokeMint) {
+          feeTransaction.add(
+            SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE })
+          );
+        }
+
+        const { signature: feeSignature, lastValidBlockHeight: feeBlockHeight } = await signAndSendTransaction(feeTransaction);
+        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
+        console.log('Fee transferred:', feeSignature);
+
+        // Token creation transaction
         const tokenTransaction = new Transaction({
           recentBlockhash: blockhash,
           feePayer: publicKey,
@@ -208,13 +254,13 @@ export default function Home() {
             mintKeypair.publicKey,
             tokenProgramId
           ),
-          createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId)
+          createMintToInstruction(mintKeypair.publicKey, associatedToken, publicKey, totalSupply, [], tokenProgramId})
         );
 
         if (revokeMint) {
           tokenTransaction.add(
             createSetAuthorityInstruction(
-              mintKeypair.publicKey,
+              mintKeypair.publicKeypair,
               publicKey,
               AuthorityType.MintTokens,
               null,
@@ -224,14 +270,7 @@ export default function Home() {
           );
         }
 
-        // Explicitly sign transaction for simulation
-        if (signTransaction) {
-          tokenTransaction.partialSign(mintKeypair);
-          const signedTx = await signTransaction(tokenTransaction);
-          tokenTransaction.signatures = signedTx.signatures;
-        }
-
-        // Simulate transaction with try-catch
+        // Simulate transaction
         let simulation;
         try {
           simulation = await connection.simulateTransaction(tokenTransaction, [mintKeypair]);
@@ -244,41 +283,29 @@ export default function Home() {
           setStatus('Simulation failed, attempting transaction anyway...');
         }
 
-        // Send fee transfer transaction
-        const feeTransaction = new Transaction({
-          recentBlockhash: blockhash,
-          feePayer: publicKey,
-        });
-        feeTransaction.add(
-          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: FEE_AMOUNT })
-        );
-
-        if (revokeMint) {
-          feeTransaction.add(
-            SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: feeRecipient, lamports: REVOKE_MINT_FEE })
-          );
-        }
-
-        const { signature: feeSignature } = await signAndSend(feeTransaction, { signers: [] });
-        await connection.confirmTransaction({ signature: feeSignature, blockhash, lastValidBlockHeight }, 'confirmed');
-        console.log('Fee transferred:', feeSignature);
-
         // Send token creation transaction
         if (Date.now() - blockhashTimestamp > BLOCKHASH_EXPIRY_MS) {
           throw new Error('Blockhash expired before transaction submission');
         }
 
-        const { signature } = await signAndSend(tokenTransaction, { signers: [mintKeypair] });
-        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+        const { signature, lastValidBlockHeight: tokenBlockHeight } = await signAndSendTransaction(tokenTransaction, [mintKeypair]);
+        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight: tokenBlockHeight }, 'confirmed');
 
-        // Add metadata using Metaplex SDK
+        // Add metadata
         setStatus('Adding token metadata...');
         console.log('Adding token metadata...');
         const metaplex = new Metaplex(connection);
-        metaplex.use(walletAdapterIdentity(wallet));
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Additional delay for Metaplex
+        // Use window.solana as the wallet
+        metaplex.use({
+          signTransaction: async (tx) => {
+            const signedTx = await window.solana.signTransaction(tx);
+            return signedTx;
+          },
+          publicKey,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         const { nft } = await metaplex.nfts().create({
-          uri: '', // Add IPFS later if needed
+          uri: '',
           name: tokenName,
           symbol: tokenSymbol,
           sellerFeeBasisPoints: 0,
@@ -333,6 +360,12 @@ export default function Home() {
           setStatus(`Error: ${error.message}`);
         }
 
+        if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
+          setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+        } else if (error.message.includes('block height exceeded')) {
+          setStatus('Transaction expired due to network delay. Retrying...');
+        }
+
         if (attempts === maxAttempts) {
           setStatus(`Failed after ${maxAttempts} attempts: ${error.message}`);
           console.log(`Failed after ${maxAttempts} attempts`);
@@ -340,19 +373,17 @@ export default function Home() {
         }
         setStatus(`Retrying (${attempts}/${maxAttempts})...`);
         console.log(`Retrying (${attempts}/${maxAttempts})`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
   };
 
   const transferTokens = async () => {
-    if (!walletReady || !connected || !publicKey || !mintAddress || !recipientAddress || !transferAmount || transferAmount <= 0) {
+    if (!connected || !publicKey || !mintAddress || !recipientAddress || !transferAmount || transferAmount <= 0) {
       setStatus('Please connect wallet, select a token, enter a valid recipient address and amount!');
       console.log('Invalid transfer conditions');
       return;
     }
-
-    const signAndSend = await getSignAndSendTransaction();
 
     try {
       setStatus('Checking SOL balance for transfer...');
@@ -364,10 +395,6 @@ export default function Home() {
         );
       }
 
-      setStatus('Ensuring wallet connection...');
-      console.log('Ensuring wallet connection...');
-      await ensureWalletConnected();
-
       setStatus('Transferring tokens...');
       console.log('Transferring tokens...');
       const mintPublicKey = new PublicKey(mintAddress);
@@ -375,11 +402,9 @@ export default function Home() {
       const recipientPublicKey = new PublicKey(recipientAddress);
       const amount = BigInt(Math.round(parseFloat(transferAmount) * Math.pow(10, decimals)));
 
-      // Get sender and recipient ATAs
       const senderATA = getAssociatedTokenAddressSync(mintPublicKey, publicKey, false, tokenProgramId);
       const recipientATA = getAssociatedTokenAddressSync(mintPublicKey, recipientPublicKey, false, tokenProgramId);
 
-      // Check if recipient ATA exists
       const recipientAccount = await connection.getAccountInfo(recipientATA);
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
 
@@ -388,7 +413,6 @@ export default function Home() {
         feePayer: publicKey,
       });
 
-      // Create recipient ATA if it doesn't exist
       if (!recipientAccount) {
         transaction.add(
           createAssociatedTokenAccountInstruction(
@@ -406,7 +430,7 @@ export default function Home() {
         createTransferInstruction(senderATA, recipientATA, publicKey, amount, [], tokenProgramId)
       );
 
-      const { signature } = await signAndSend(transaction, { signers: [] });
+      const { signature } = await signAndSendTransaction(transaction);
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
       console.log(`Transferred ${transferAmount} ${tokenSymbol} to ${recipientAddress}!`);
@@ -415,6 +439,11 @@ export default function Home() {
     } catch (error) {
       console.error('Transfer error:', error);
       setStatus(`Error transferring tokens: ${error.message}`);
+      if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+      } else if (error.message.includes('block height exceeded')) {
+        setStatus('Transaction expired due to network delay. Please try again.');
+      }
     }
   };
 
@@ -423,13 +452,11 @@ export default function Home() {
     setRevokeMint(isChecked);
     if (!isChecked || !mintAddress) return;
 
-    if (!walletReady || !connected || !publicKey) {
+    if (!connected || !publicKey) {
       setStatus('Wallet not ready! Please reconnect.');
       setRevokeMint(false);
       return;
     }
-
-    const signAndSend = await getSignAndSendTransaction();
 
     try {
       setStatus('Checking SOL balance for revocation...');
@@ -440,10 +467,6 @@ export default function Home() {
           `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
         );
       }
-
-      setStatus('Ensuring wallet connection...');
-      console.log('Ensuring wallet connection...');
-      await ensureWalletConnected();
 
       setStatus('Revoking mint authority...');
       console.log('Revoking mint authority...');
@@ -468,13 +491,18 @@ export default function Home() {
         )
       );
 
-      const { signature } = await signAndSend(transaction, { signers: [] });
+      const { signature } = await signAndSendTransaction(transaction);
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus('Mint authority revoked!');
       console.log('Mint authority revoked!');
     } catch (error) {
       console.error('Revoke mint error:', error);
       setStatus(`Error revoking mint: ${error.message}`);
+      if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+      } else if (error.message.includes('block height exceeded')) {
+        setStatus('Transaction expired due to network delay. Please try again.');
+      }
       setRevokeMint(false);
     }
   };
@@ -490,13 +518,11 @@ export default function Home() {
   };
 
   const revokeExistingMint = async () => {
-    if (!walletReady || !connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
+    if (!connected || !publicKey || !tokenProgramId || !selectedMintAddress) {
       setStatus('Connect wallet and enter a mint address to revoke!');
       console.log('Invalid revoke conditions');
       return;
     }
-
-    const signAndSend = await getSignAndSendTransaction();
 
     try {
       setStatus('Checking SOL balance for revocation...');
@@ -507,10 +533,6 @@ export default function Home() {
           `Insufficient SOL for revocation fee: You have ${(balanceInLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, need ${REVOKE_MINT_FEE / LAMPORTS_PER_SOL} SOL`
         );
       }
-
-      setStatus('Ensuring wallet connection...');
-      console.log('Ensuring wallet connection...');
-      await ensureWalletConnected();
 
       setStatus('Revoking mint authority for selected token...');
       console.log('Revoking mint authority for selected token...');
@@ -535,7 +557,7 @@ export default function Home() {
         )
       );
 
-      const { signature } = await signAndSend(transaction, { signers: [] });
+      const { signature } = await signAndSendTransaction(transaction);
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       setStatus(`Mint authority revoked for ${selectedMintAddress}!`);
       console.log(`Mint authority revoked for ${selectedMintAddress}!`);
@@ -543,6 +565,11 @@ export default function Home() {
     } catch (error) {
       console.error('Revoke existing mint error:', error);
       setStatus(`Error: ${error.message}`);
+      if (error.message.includes('disconnected port') || error.message.includes('service worker')) {
+        setStatus('Phantom wallet error: Disconnected. Please disconnect and reconnect your wallet.');
+      } else if (error.message.includes('block height exceeded')) {
+        setStatus('Transaction expired due to network delay. Please try again.');
+      }
     }
   };
 
@@ -564,9 +591,12 @@ export default function Home() {
           <img src="/elon-powersaw.png" alt="Elon Musk with Powersaw" className={styles.elonImage} />
           <div className={styles.logo}>Meme Coins Creator</div>
         </div>
-        <WalletMultiButtonDynamic className={styles.walletButton}>
-          {connected ? null : 'Connect Wallet'}
-        </WalletMultiButtonDynamic>
+        <button
+          className={styles.walletButton}
+          onClick={connected ? disconnectWallet : connectWallet}
+        >
+          {connected ? 'Disconnect Wallet' : 'Connect Wallet'}
+        </button>
       </header>
       <main className={styles.main}>
         <div className={styles.contentWrapper}>
