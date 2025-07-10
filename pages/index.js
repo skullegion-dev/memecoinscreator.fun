@@ -8,7 +8,7 @@ import styles from '../styles/Home.module.css';
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
-const FEE_RECIPIENT_ADDRESS = '4b3Dkfw9sdCbYRv68j3Nd3MBT8vNDTpciJTeZHCNkRBm';
+const FEE_RECIPIENT_ADDRESS = 'G57V122piv7q2e5fRVc1dPBnkgGyNMtVeasUmZpkMpec';
 const BLOCKHASH_EXPIRY_MS = 60000;
 const RPC_RETRIES = 5;
 const RPC_RETRY_DELAY_MS = 1000;
