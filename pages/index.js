@@ -5,8 +5,8 @@ import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityIn
 import { Metaplex, walletAdapterIdentity } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
 
-const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
-const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
+const FEE_AMOUNT = 0.0001 * LAMPORTS_PER_SOL;
+const REVOKE_MINT_FEE = 0.00002 * LAMPORTS_PER_SOL;
 const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = 'G57V122piv7q2e5fRVc1dPBnkgGyNMtVeasUmZpkMpec';
 const BLOCKHASH_EXPIRY_MS = 60000;
