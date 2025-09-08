@@ -7,7 +7,7 @@ import styles from '../styles/Home.module.css';
 
 const FEE_AMOUNT = 0.05 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
-const TRANSFER_FEE = 0.05 * LAMPORTS_PER_SOL;
+const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = 'G57V122piv7q2e5fRVc1dPBnkgGyNMtVeasUmZpkMpec';
 const BLOCKHASH_EXPIRY_MS = 60000;
 const RPC_RETRIES = 5;
