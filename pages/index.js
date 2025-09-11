@@ -5,7 +5,7 @@ import { TOKEN_PROGRAM_ID, createInitializeMintInstruction, createSetAuthorityIn
 import { Metaplex, walletAdapterIdentity } from '@metaplex-foundation/js';
 import styles from '../styles/Home.module.css';
 
-const FEE_AMOUNT = 0.000001 * LAMPORTS_PER_SOL;
+const FEE_AMOUNT = 0.00000001 * LAMPORTS_PER_SOL;
 const REVOKE_MINT_FEE = 0.025 * LAMPORTS_PER_SOL;
 const TRANSFER_FEE = 0.001 * LAMPORTS_PER_SOL;
 const FEE_RECIPIENT_ADDRESS = 'G57V122piv7q2e5fRVc1dPBnkgGyNMtVeasUmZpkMpec';
@@ -224,7 +224,7 @@ export default function Home() {
       try {
         setStatus('Checking SOL balance...');
         console.log('Checking SOL balance...');
-        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.000001 * LAMPORTS_PER_SOL);
+        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.0 * LAMPORTS_PER_SOL);
         const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
         if (balanceInLamports < totalRequiredLamports) {
           throw new Error(
