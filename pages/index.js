@@ -224,7 +224,7 @@ export default function Home() {
       try {
         setStatus('Checking SOL balance...');
         console.log('Checking SOL balance...');
-        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.005 * LAMPORTS_PER_SOL);
+        const totalRequiredLamports = FEE_AMOUNT + (revokeMint ? REVOKE_MINT_FEE : 0) + (0.000001 * LAMPORTS_PER_SOL);
         const balanceInLamports = await withRpcRetry(connection.getBalance.bind(connection), [publicKey]);
         if (balanceInLamports < totalRequiredLamports) {
           throw new Error(
