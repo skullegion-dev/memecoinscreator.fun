@@ -366,7 +366,7 @@ export default function Home() {
 
         if (tokenCreated) {
           const solPrice = await fetchSolPrice();
-          const value = solPrice ? (0.05 + (revokeMint ? 0.025 : 0)) * solPrice : 0.05 + (revokeMint ? 0.025 : 0);
+          const value = solPrice ? (1.00 + (revokeMint ? 0.025 : 0)) * solPrice : 1.00 + (revokeMint ? 0.025 : 0);
           const currency = solPrice ? 'USD' : 'SOL';
 
           if (typeof window !== 'undefined' && window.gtag) {
